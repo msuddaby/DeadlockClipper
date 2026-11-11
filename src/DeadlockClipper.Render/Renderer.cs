@@ -23,7 +23,9 @@ public sealed class Renderer(
         IReadOnlyList<RenderJob> jobs, IProgress<RenderProgress>? progress, CancellationToken ct)
     {
         var results = new List<RenderResult>();
-        foreach (var job in jobs.OrderBy(j => j.StartTick))
+        // Multi-segment jobs (compilations) span most of the match; doing them last lets the single clips share one
+        // forward pass through the demo.
+        foreach (var job in jobs.OrderBy(j => j.ClipSegments.Count > 1).ThenBy(j => j.StartTick))
         {
             ct.ThrowIfCancellationRequested();
             results.Add(await RenderWithRetryAsync(job, progress, ct));
@@ -65,50 +67,64 @@ public sealed class Renderer(
         if (!game.IsLaunched || !await game.IsAliveAsync(ct))
         {
             Report(RenderStage.Launching);
-            await game.LaunchAsync(ct);
+            await game.LaunchAsync(ct, new InlineProgress<string>(m => Report(RenderStage.Launching, m)));
         }
 
         var demoPath = await stageDemo(job.DemoKey, job.DemoPath, ct);
-        var plan = SeekPlanner.Plan(game.CurrentTick, job.StartTick, options.SeekStepTicks);
-        if (game.LoadedDemo != demoPath || plan.RequiresReload)
-        {
-            Report(RenderStage.LoadingDemo);
-            await LoadDemoAsync(demoPath, ct);
-            plan = SeekPlanner.Plan(0, job.StartTick, options.SeekStepTicks);
-        }
-
-        await game.SendAsync("demo_pause", ct);
-        for (var i = 0; i < plan.Hops.Count; i++)
-        {
-            Report(RenderStage.Seeking, $"{i + 1}/{plan.Hops.Count}");
-            await game.SendAsync($"demo_gototick {plan.Hops[i]}", ct);
-            await _delay(TimeSpan.FromSeconds(options.HopSettleSeconds), ct);
-            await EnsureAliveAsync($"seeking to tick {plan.Hops[i]}", ct);
-            game.CurrentTick = plan.Hops[i];
-        }
-
-        await game.SendAsync(string.Join('\n',
-            $"citadel_spectate_topbar_player {job.TopBarSlot}",
-            "citadel_hud_visible 1",
-            "citadel_hide_replay_hud 1"), ct);
-        await _delay(TimeSpan.FromSeconds(2), ct);
-
+        var segments = job.ClipSegments;
         var workDir = Path.Combine(options.WorkDir, job.JobId);
-        RawRecording raw;
-        Report(RenderStage.Recording);
-        await using (var recording = await recorder.StartAsync(workDir, ct))
+        var raws = new List<RawRecording>();
+
+        for (var n = 0; n < segments.Count; n++)
         {
-            await game.SendAsync("demo_resume", ct);
-            // Playback is real time: the clip takes as long to record as it lasts.
-            await _delay(TimeSpan.FromSeconds(job.DurationSeconds), ct);
+            var segment = segments[n];
+            var of = segments.Count > 1 ? $" {n + 1}/{segments.Count}" : "";
+
+            var preRollTicks = (int)Math.Round(options.PreRollSeconds * job.TickRate);
+            var from = SeekPlanner.PlayFrom(game.CurrentTick, game.LoadedDemo == demoPath, segment.StartTick, preRollTicks);
+            var plan = SeekPlanner.Plan(game.CurrentTick, from, options.SeekStepTicks);
+            if (game.LoadedDemo != demoPath || plan.RequiresReload)
+            {
+                Report(RenderStage.LoadingDemo);
+                await LoadDemoAsync(demoPath, ct);
+                from = SeekPlanner.PlayFrom(0, true, segment.StartTick, preRollTicks);
+                plan = SeekPlanner.Plan(0, from, options.SeekStepTicks);
+            }
+
             await game.SendAsync("demo_pause", ct);
-            raw = await recording.StopAsync();
+            for (var i = 0; i < plan.Hops.Count; i++)
+            {
+                Report(RenderStage.Seeking, segments.Count > 1 ? $"segment{of}, hop {i + 1}/{plan.Hops.Count}" : $"{i + 1}/{plan.Hops.Count}");
+                await game.SendAsync($"demo_gototick {plan.Hops[i]}", ct);
+                await _delay(TimeSpan.FromSeconds(options.HopSettleSeconds), ct);
+                await EnsureAliveAsync($"seeking to tick {plan.Hops[i]}", ct);
+                game.CurrentTick = plan.Hops[i];
+            }
+
+            // Re-sent per segment: a seek can drop the spectator back to the default camera.
+            await game.SendAsync(string.Join('\n',
+                $"citadel_spectate_topbar_player {job.TopBarSlot}",
+                "citadel_hud_visible 1",
+                "citadel_hide_replay_hud 1"), ct);
+            await _delay(TimeSpan.FromSeconds(2), ct);
+
+            // The warm-up is recorded too and trimmed off when the clip is finished.
+            var preRoll = (segment.StartTick - from) / job.TickRate;
+            Report(RenderStage.Recording, of.Trim());
+            await using (var recording = await recorder.StartAsync(segments.Count > 1 ? Path.Combine(workDir, $"seg{n}") : workDir, ct))
+            {
+                await game.SendAsync("demo_resume", ct);
+                // Playback is real time: a segment takes as long to record as it lasts.
+                await _delay(TimeSpan.FromSeconds(preRoll + job.SegmentSeconds(segment)), ct);
+                await game.SendAsync("demo_pause", ct);
+                raws.Add(await recording.StopAsync() with { PreRollSeconds = preRoll });
+            }
+            game.CurrentTick = segment.EndTick;
+            await EnsureAliveAsync("recording", ct);
         }
-        game.CurrentTick = job.EndTick;
-        await EnsureAliveAsync("recording", ct);
 
         Report(RenderStage.Encoding);
-        await finisher.FinishAsync(job, raw, workDir, ct);
+        await finisher.FinishAsync(job, raws, workDir, ct);
         TryDelete(workDir);
     }
 
@@ -127,6 +143,12 @@ public sealed class Renderer(
     private async Task EnsureAliveAsync(string during, CancellationToken ct)
     {
         if (!await game.IsAliveAsync(ct)) throw new GameCrashedException($"Game exited while {during}.");
+    }
+
+    /// <summary>Reports synchronously (System.Progress posts to the thread pool and can reorder updates).</summary>
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     private static void TryDelete(string dir)

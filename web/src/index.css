@@ -270,6 +270,7 @@ progress.wide {
   color: var(--ok);
   border-color: color-mix(in srgb, var(--ok) 40%, transparent);
 }
+.badge.downloading,
 .badge.parsing,
 .badge.queued {
   color: var(--warn);
@@ -287,6 +288,9 @@ progress.wide {
 }
 .badge.hl-quadkill {
   color: #ff9cd2;
+}
+.badge.hl-killcompilation {
+  color: #8fe3b0;
 }
 .badge.hl-pentakill,
 .badge.hl-megakill {
@@ -487,4 +491,38 @@ progress.wide {
   .topbar {
     gap: 16px;
   }
+}
+
+.text-input {
+  background: var(--bg);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  min-width: 0;
+}
+.inline-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.hl-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.score {
+  font-weight: 700;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.load-more {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }

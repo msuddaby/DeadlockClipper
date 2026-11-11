@@ -5,9 +5,12 @@
     <Project Path="src/DeadlockClipper.GameData/DeadlockClipper.GameData.csproj" />
     <Project Path="src/DeadlockClipper.Render.Cli/DeadlockClipper.Render.Cli.csproj" />
     <Project Path="src/DeadlockClipper.Render/DeadlockClipper.Render.csproj" />
+    <Project Path="src/DeadlockClipper.Steam.Cli/DeadlockClipper.Steam.Cli.csproj" />
+    <Project Path="src/DeadlockClipper.Steam/DeadlockClipper.Steam.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DeadlockClipper.Core.Tests/DeadlockClipper.Core.Tests.csproj" />
     <Project Path="tests/DeadlockClipper.Render.Tests/DeadlockClipper.Render.Tests.csproj" />
+    <Project Path="tests/DeadlockClipper.Steam.Tests/DeadlockClipper.Steam.Tests.csproj" />
   </Folder>
 </Solution>

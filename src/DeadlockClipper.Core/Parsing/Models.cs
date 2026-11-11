@@ -45,7 +45,12 @@ public enum HighlightType
     QuadKill,
     PentaKill,
     MegaKill, // 6+
+    // All of one player's kills spliced together; see Highlights.KillCompilation.
+    KillCompilation,
 }
+
+/// <summary>A stretch of demo to record, in ticks.</summary>
+public sealed record ClipSegment(int StartTick, int EndTick);
 
 public sealed record Highlight(
     // Stable within a demo: "{playerSteamId}-{startTick}".
@@ -62,7 +67,9 @@ public sealed record Highlight(
     int ClipStartTick,
     int ClipEndTick,
     double Score,
-    IReadOnlyList<KillEvent> Kills);
+    IReadOnlyList<KillEvent> Kills,
+    // Set when the clip is several pieces of the demo joined together; ClipStartTick/ClipEndTick then span all of them.
+    IReadOnlyList<ClipSegment>? Segments = null);
 
 public sealed record MatchAnalysis(
     long? MatchId,

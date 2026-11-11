@@ -1,9 +1,9 @@
 // Mirrors the .NET DTOs. Steam IDs are strings (64-bit values exceed JS number precision).
 
 export type DemoSource = 'Upload' | 'LocalReplay' | 'MatchId'
-export type DemoStatus = 'Queued' | 'Parsing' | 'Done' | 'Failed'
+export type DemoStatus = 'Downloading' | 'Queued' | 'Parsing' | 'Done' | 'Failed'
 export type Team = 'Unknown' | 'Spectator' | 'Amber' | 'Sapphire'
-export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill'
+export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation'
 
 export interface DemoSummary {
   id: string
@@ -141,6 +141,69 @@ export interface RenderHealth {
   checks: HealthCheck[]
 }
 
+export type MetadataStatus = 'Pending' | 'Done' | 'Unavailable' | 'Failed'
+
+export interface MatchHighlight {
+  type: HighlightType
+  timeSeconds: number
+  kills: number
+  score: number
+}
+
+export interface ScannedMatch {
+  matchId: number
+  startTime: string
+  durationSeconds: number
+  heroId: number
+  kills: number
+  deaths: number
+  assists: number
+  netWorth: number
+  metadataStatus: MetadataStatus
+  error: string | null
+  score: number | null
+  highlights: MatchHighlight[]
+  replayValidThrough: string | null
+  demoId: string | null
+  demoStatus: DemoStatus | null
+}
+
+export interface ScanResult {
+  matches: ScannedMatch[]
+  /** The history has no matches older than these. */
+  reachedEnd: boolean
+}
+
+export interface SteamAccount {
+  account: string
+  connected: boolean
+  lastError: string | null
+  /** Paced: when this account may make its next metadata request. */
+  nextRequestAt: string | null
+  /** Set while Valve is refusing this account's metadata requests. */
+  rateLimitedUntil: string | null
+  requestsMade: number
+}
+
+export interface SteamStatus {
+  accounts: SteamAccount[]
+  /** Every account is rate-limited: metadata reading resumes at this time. */
+  scanPausedUntil: string | null
+  metadataIntervalSeconds: number
+}
+
+export type LoginState = 'Starting' | 'NeedsCode' | 'ConfirmOnPhone' | 'Verifying' | 'Done' | 'Failed'
+
+export interface LoginStatus {
+  id: string
+  username: string
+  state: LoginState
+  codeKind: 'authenticator' | 'email' | null
+  emailHint: string | null
+  previousCodeWrong: boolean
+  error: string | null
+}
+
 export const videoUrl = (renderId: string) => `/api/renders/${renderId}/video`
 /** Same video, but the browser shows the frame at 1s as the poster instead of the (often dark) first frame. */
 export const previewUrl = (renderId: string) => `${videoUrl(renderId)}#t=1`
@@ -184,6 +247,33 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ steamId }),
     }),
+  renderCompilation: (demoId: string, steamId: string) =>
+    request<RenderInfo>(`/api/demos/${demoId}/players/${steamId}/compilation`, { method: 'POST' }),
+  steamStatus: () => request<SteamStatus>('/api/steam/status'),
+  addSteamAccount: (username: string, password: string) =>
+    request<LoginStatus>('/api/steam/accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    }),
+  steamLogin: (id: string) => request<LoginStatus>(`/api/steam/logins/${id}`),
+  submitSteamCode: (id: string, code: string) =>
+    request<LoginStatus>(`/api/steam/logins/${id}/code`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    }),
+  removeSteamAccount: (name: string) =>
+    request<void>(`/api/steam/accounts/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  matches: (steamId: string) => request<ScannedMatch[]>(`/api/matches?steamId=${steamId}`),
+  scanMatches: (steamId: string, older = false) =>
+    request<ScanResult>('/api/matches/scan', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ steamId, older }),
+    }),
+  downloadMatch: (matchId: number) => request<DemoSummary>(`/api/matches/${matchId}/download`, { method: 'POST' }),
+  cancelDownload: (demoId: string) => request<DemoSummary>(`/api/demos/${demoId}/cancel-download`, { method: 'POST' }),
   deleteRender: (id: string) => request<void>(`/api/renders/${id}`, { method: 'DELETE' }),
   renderHealth: () => request<RenderHealth>('/api/render/health'),
 }

@@ -32,7 +32,6 @@ public class OverlayTests
             new OverlayCue(OverlayKind.Kill, 1, 13.24, 14.14, OverlayAnimation.SlideFromLeft),
             new OverlayCue(OverlayKind.Final, 0, 13.39, 15.140625, OverlayAnimation.SlideFromRight),
         ], plan.Cues.Select(c => c with { Start = Math.Round(c.Start, 2), End = Math.Round(c.End, 6) }));
-        Assert.Equal([5.1, 13.24], plan.Flashes.Select(f => Math.Round(f, 2)));
     }
 
     [Fact]
@@ -79,7 +78,9 @@ public class OverlayTests
             var graph = ClipComposer.BuildOverlayGraph(overlays, 60, 1920, 1080, 1);
             var output = Path.Combine(work, "out.mp4");
             var args = new List<string> { "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=60:duration=15.14" };
-            foreach (var l in overlays.Layers) args.AddRange(["-loop", "1", "-framerate", "60", "-t", "15.14", "-i", l.PngPath]);
+            foreach (var l in overlays.Layers)
+                args.AddRange(["-loop", "1", "-framerate", "60", "-t",
+                    ClipComposer.OverlayInputSeconds(l.Cue).ToString(System.Globalization.CultureInfo.InvariantCulture), "-i", l.PngPath]);
             args.AddRange(["-filter_complex", graph, "-map", "[vout]", "-c:v", "libx264", "-preset", "ultrafast", output]);
             var r = await new ProcessRunner().RunAsync("ffmpeg", args, timeout: TimeSpan.FromMinutes(2));
             Assert.True(r.Success, r.StdErr);

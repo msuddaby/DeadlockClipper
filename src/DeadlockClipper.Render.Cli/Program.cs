@@ -1,10 +1,12 @@
 ﻿// Render highlights from a demo without the web app. Used to smoke-test the render pipeline end to end.
 //
 //   dotnet run --project src/DeadlockClipper.Render.Cli -- <demo.dem> [--highlight <id>] [--player <steamId>]
-//       [--game-dir <Deadlock/game/citadel>] [--out <dir>]
+//       [--compilation <steamId>] [--game-dir <Deadlock/game/citadel>] [--out <dir>]
 //
-// With neither --highlight nor --player, every highlight in the demo is rendered.
+// With neither --highlight nor --player, every highlight in the demo is rendered. --compilation renders one clip of
+// all that player's kills instead.
 
+using DeadlockClipper.Core.Highlights;
 using DeadlockClipper.Core.Parsing;
 using DeadlockClipper.Render;
 using Microsoft.Extensions.Logging;
@@ -21,10 +23,12 @@ var log = loggerFactory.CreateLogger("cli");
 
 log.LogInformation("Parsing {Demo}", demoPath);
 var analysis = await new DemoAnalyzer().AnalyzeFileAsync(demoPath);
-var highlights = analysis.Highlights
-    .Where(h => Arg("--highlight") is not { } id || h.Id == id)
-    .Where(h => Arg("--player") is not { } p || h.PlayerSteamId.ToString() == p)
-    .ToList();
+var highlights = Arg("--compilation") is { } compilationOf
+    ? (ulong.TryParse(compilationOf, out var sid) ? KillCompilation.Build(analysis, sid) : null) is { } c ? [c] : new List<Highlight>()
+    : analysis.Highlights
+        .Where(h => Arg("--highlight") is not { } id || h.Id == id)
+        .Where(h => Arg("--player") is not { } p || h.PlayerSteamId.ToString() == p)
+        .ToList();
 if (highlights.Count == 0)
 {
     log.LogError("No matching highlights. Available: {Ids}", string.Join(", ", analysis.Highlights.Select(h => $"{h.Id} ({h.Type}, {h.PlayerName})")));
@@ -81,7 +85,7 @@ finally
 
 static string Usage()
 {
-    Console.Error.WriteLine("usage: <demo.dem> [--highlight <id>] [--player <steamId>] [--game-dir <dir>] [--out <dir>]");
+    Console.Error.WriteLine("usage: <demo.dem> [--highlight <id>] [--player <steamId>] [--compilation <steamId>] [--game-dir <dir>] [--out <dir>]");
     Environment.Exit(64);
     return "";
 }

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using DeadlockClipper.Api.Data;
 using DeadlockClipper.Api.Heroes;
+using DeadlockClipper.Core.Highlights;
 using DeadlockClipper.Core.Parsing;
 using DeadlockClipper.Render;
 using Microsoft.EntityFrameworkCore;
@@ -106,7 +107,7 @@ public sealed class RenderWorker(
         var jobs = new List<RenderJob>();
         foreach (var r in batch)
         {
-            var highlight = analysis.Highlights.FirstOrDefault(h => h.Id == r.HighlightId);
+            var highlight = KillCompilation.Find(analysis, r.HighlightId);
             if (highlight == null)
             {
                 await FailAsync([r], "Highlight not found in the demo's analysis.", ct);

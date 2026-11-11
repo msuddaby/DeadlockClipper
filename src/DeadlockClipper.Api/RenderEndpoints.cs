@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DeadlockClipper.Api.Data;
 using DeadlockClipper.Api.Jobs;
+using DeadlockClipper.Core.Highlights;
 using DeadlockClipper.Core.Parsing;
 using DeadlockClipper.Render;
 using Microsoft.EntityFrameworkCore;
@@ -67,6 +68,22 @@ public static class RenderEndpoints
                     renders.Add(await EnqueueAsync(id, h, analysis, db));
                 queue.Notify();
                 return Results.Ok(renders.Select(r => ToDto(r, queue)));
+            });
+
+        api.MapPost("/demos/{id:guid}/players/{steamId}/compilation",
+            async (Guid id, string steamId, AppDbContext db, RenderQueue queue, JsonSerializerOptions json) =>
+            {
+                var (analysis, error) = await LoadAnalysisAsync(id, db, json);
+                if (analysis == null) return error!;
+                if (!ulong.TryParse(steamId, out var player)) return Results.Problem("Invalid steamId.", statusCode: 400);
+                if (analysis.Players.All(p => p.SteamId != player)) return Results.NotFound();
+
+                var compilation = KillCompilation.Build(analysis, player);
+                if (compilation == null) return Results.Problem("This player needs at least 2 hero kills for a compilation.", statusCode: 409);
+
+                var render = await EnqueueAsync(id, compilation, analysis, db);
+                queue.Notify();
+                return Results.Ok(ToDto(render, queue));
             });
 
         api.MapGet("/renders/{id:guid}/video", async (Guid id, AppDbContext db) =>

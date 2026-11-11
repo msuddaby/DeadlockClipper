@@ -4,6 +4,7 @@
     <ProjectReference Include="..\DeadlockClipper.Core\DeadlockClipper.Core.csproj" />
     <ProjectReference Include="..\DeadlockClipper.Render\DeadlockClipper.Render.csproj" />
     <ProjectReference Include="..\DeadlockClipper.GameData\DeadlockClipper.GameData.csproj" />
+    <ProjectReference Include="..\DeadlockClipper.Steam\DeadlockClipper.Steam.csproj" />
   </ItemGroup>
 
   <ItemGroup>

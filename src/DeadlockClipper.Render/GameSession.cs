@@ -18,7 +18,8 @@ public interface IGameSession
     /// <summary>Best-known current demo tick (only ever moved forward by seeks/playback).</summary>
     int CurrentTick { get; set; }
 
-    Task LaunchAsync(CancellationToken ct);
+    /// <param name="status">Launch progress worth showing (e.g. "Steam is updating Deadlock").</param>
+    Task LaunchAsync(CancellationToken ct, IProgress<string>? status = null);
     Task SendAsync(string commands, CancellationToken ct);
     /// <summary>Remembers the current end of console.log so the next wait only sees new lines.</summary>
     void MarkLog();
@@ -49,7 +50,10 @@ public sealed class GameSession(RenderOptions options, IProcessRunner runner, IL
     private static string RuntimeDir =>
         Path.Combine(Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? "/tmp", "deadlock-clipper");
 
-    public async Task LaunchAsync(CancellationToken ct)
+    /// <summary>How long to wait for a Steam update of Deadlock that interrupted a launch.</summary>
+    private static readonly TimeSpan UpdateTimeout = TimeSpan.FromMinutes(30);
+
+    public async Task LaunchAsync(CancellationToken ct, IProgress<string>? status = null)
     {
         Reset();
         if (await IsAliveAsync(ct))
@@ -74,10 +78,37 @@ public sealed class GameSession(RenderOptions options, IProcessRunner runner, IL
             log.LogInformation("Launching Deadlock in render mode");
             var steamLogMark = SteamConsoleLogLength();
             await runner.RunAsync("steam", [$"steam://rungameid/{options.SteamAppId}"], timeout: TimeSpan.FromSeconds(10), ct: ct);
+            var relaunched = false;
 
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(options.LaunchTimeoutSeconds);
             while (_window == null)
             {
+                var launch = SteamLaunch(steamLogMark);
+                if (launch.Failed)
+                {
+                    // Steam aborts a launch when it finds a game update (AppError_19), then installs the update.
+                    // Wait for that to finish and launch again, once.
+                    if (!launch.Updating || relaunched)
+                        throw new InvalidOperationException(launch.Error == "AppError_19"
+                            ? "Steam says Deadlock needs an update before it can start. Let Steam finish updating it, then retry."
+                            : $"Steam couldn't start Deadlock ({launch.Error}).");
+                    status?.Report("Steam is updating Deadlock");
+                    log.LogInformation("Steam aborted the launch to update Deadlock; waiting for the update");
+                    await WaitForUpdateAsync(ct);
+                    log.LogInformation("Deadlock updated; launching again");
+                    status?.Report("Launching the updated game");
+                    steamLogMark = SteamConsoleLogLength();
+                    await runner.RunAsync("steam", [$"steam://rungameid/{options.SteamAppId}"], timeout: TimeSpan.FromSeconds(10), ct: ct);
+                    relaunched = true;
+                    deadline = DateTime.UtcNow + TimeSpan.FromSeconds(options.LaunchTimeoutSeconds);
+                    continue;
+                }
+                if (launch.Updating)
+                {
+                    status?.Report("Steam is updating Deadlock");
+                    deadline = DateTime.UtcNow + TimeSpan.FromSeconds(options.LaunchTimeoutSeconds); // downloads take a while
+                }
+
                 if (DateTime.UtcNow > deadline)
                     throw new TimeoutException(SteamWaitingFor(steamLogMark) is { } prompt
                         ? $"Steam is waiting for you to answer a dialog ({prompt}) before Deadlock can start. Answer it in Steam, then retry."
@@ -172,6 +203,86 @@ public sealed class GameSession(RenderOptions options, IProcessRunner runner, IL
 
     private static string SteamConsoleLog =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local/share/Steam/logs/console_log.txt");
+
+    internal sealed record SteamLaunchState(bool Failed, string? Error, bool Updating);
+
+    private SteamLaunchState SteamLaunch(long fromOffset)
+    {
+        try
+        {
+            using var fs = new FileStream(SteamConsoleLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length < fromOffset) fromOffset = 0;
+            fs.Seek(fromOffset, SeekOrigin.Begin);
+            return ParseSteamLaunch(new StreamReader(fs).ReadToEnd(), options.SteamAppId);
+        }
+        catch (IOException)
+        {
+            return new SteamLaunchState(false, null, false);
+        }
+    }
+
+    /// <summary>
+    /// Reads Steam's GameAction lines for the app: "LaunchApp changed task to DownloadingDepots" (an update is being
+    /// fetched before launch) and "LaunchApp failed with AppError_19" (launch aborted).
+    /// </summary>
+    internal static SteamLaunchState ParseSteamLaunch(string steamLog, int appId)
+    {
+        var marker = $"GameAction [AppID {appId},";
+        bool failed = false, updating = false;
+        string? error = null;
+        foreach (var line in steamLog.Split('\n'))
+        {
+            if (!line.Contains(marker, StringComparison.Ordinal)) continue;
+            if (line.Contains("changed task to DownloadingDepots", StringComparison.Ordinal)) updating = true;
+            var i = line.IndexOf("LaunchApp failed with ", StringComparison.Ordinal);
+            if (i >= 0)
+            {
+                failed = true;
+                error = line[(i + 22)..].Split(' ', 2)[0];
+            }
+        }
+        return new SteamLaunchState(failed, error, updating);
+    }
+
+    /// <summary>Waits until Steam reports Deadlock fully installed again (appmanifest StateFlags 4).</summary>
+    private async Task WaitForUpdateAsync(CancellationToken ct)
+    {
+        var manifest = AppManifestPath();
+        var deadline = DateTime.UtcNow + UpdateTimeout;
+        // Give Steam a moment to flag the update before trusting "fully installed".
+        await Task.Delay(TimeSpan.FromSeconds(3), ct);
+        while (manifest == null || ReadStateFlags(manifest) != "4")
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("Steam's update of Deadlock didn't finish within 30 minutes.");
+            await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            manifest ??= AppManifestPath();
+        }
+        await Task.Delay(TimeSpan.FromSeconds(3), ct); // let Steam release the files
+    }
+
+    /// <summary>steamapps/appmanifest_{appId}.acf, found by walking up from game/citadel.</summary>
+    private string? AppManifestPath()
+    {
+        for (var dir = new DirectoryInfo(options.GameDir); dir != null; dir = dir.Parent)
+        {
+            if (dir.Name != "steamapps") continue;
+            var path = Path.Combine(dir.FullName, $"appmanifest_{options.SteamAppId}.acf");
+            return File.Exists(path) ? path : null;
+        }
+        return null;
+    }
+
+    internal static string? ParseStateFlags(string acf)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(acf, "\"StateFlags\"\\s+\"(\\d+)\"");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    private static string? ReadStateFlags(string manifest)
+    {
+        try { return ParseStateFlags(File.ReadAllText(manifest)); }
+        catch (IOException) { return null; }
+    }
 
     private static long SteamConsoleLogLength() => File.Exists(SteamConsoleLog) ? new FileInfo(SteamConsoleLog).Length : 0;
 

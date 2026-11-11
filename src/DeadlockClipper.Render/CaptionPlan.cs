@@ -19,11 +19,14 @@ public static class CaptionPlan
         if (player.TopBarSlot is < 1 or > 12)
             throw new InvalidOperationException($"No top-bar slot for {player.Name}; cannot point the camera at them.");
 
-        var label = Label(highlight.Type);
+        var label = Label(highlight.Type, highlight.Kills.Count);
+        var segments = highlight.Segments is { Count: > 0 } s
+            ? s
+            : [new ClipSegment(highlight.ClipStartTick, highlight.ClipEndTick)];
         var marks = highlight.Kills
             .OrderBy(k => k.Tick)
             .Select((k, i) => new KillMark(
-                OffsetSeconds: Math.Round((k.Tick - highlight.ClipStartTick) / analysis.TickRate, 2),
+                OffsetSeconds: Math.Round(ClipOffset(k.Tick, segments, analysis.TickRate), 2),
                 Label: i == highlight.Kills.Count - 1 ? label : "KILL",
                 IsFinal: i == highlight.Kills.Count - 1,
                 VictimName: k.VictimName,
@@ -31,11 +34,12 @@ public static class CaptionPlan
             .ToList();
 
         var hero = heroName?.Invoke(highlight.HeroId);
+        var compilation = highlight.Type == HighlightType.KillCompilation;
         var subtitle = string.Join("  ·  ", new[]
         {
             hero,
-            ToTitleCase(label),
-            FormatClock(highlight.StartTimeSeconds),
+            compilation ? "Kill Compilation" : ToTitleCase(label),
+            compilation ? $"{highlight.Kills.Count} kills" : FormatClock(highlight.StartTimeSeconds),
             analysis.MatchId is { } m ? $"Match {m}" : null,
         }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
@@ -54,11 +58,25 @@ public static class CaptionPlan
             OutputPath: outputPath,
             PlayerName: player.Name,
             PlayerHeroId: highlight.HeroId,
-            HighlightLabel: label);
+            HighlightLabel: label,
+            Segments: highlight.Segments is { Count: > 0 } ? segments : null);
     }
 
-    public static string Label(HighlightType type) => type switch
+    /// <summary>Seconds from the start of the finished clip to <paramref name="tick"/>, with the segments back to back.</summary>
+    public static double ClipOffset(int tick, IReadOnlyList<ClipSegment> segments, double tickRate)
     {
+        var before = 0;
+        foreach (var s in segments)
+        {
+            if (tick <= s.EndTick) return (before + Math.Max(0, tick - s.StartTick)) / tickRate;
+            before += s.EndTick - s.StartTick;
+        }
+        return before / tickRate;
+    }
+
+    public static string Label(HighlightType type, int kills = 0) => type switch
+    {
+        HighlightType.KillCompilation => $"{kills} KILLS",
         HighlightType.DoubleKill => "DOUBLE KILL",
         HighlightType.TripleKill => "TRIPLE KILL",
         HighlightType.QuadKill => "QUAD KILL",

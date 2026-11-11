@@ -1,3 +1,5 @@
+using DeadlockClipper.Core.Parsing;
+
 namespace DeadlockClipper.Render;
 
 /// <summary>Configuration for the local render pipeline. Bound from the "Clipper:Render" config section.</summary>
@@ -14,6 +16,12 @@ public sealed class RenderOptions
     /// <summary>Long demo_gototick jumps crash the client; seek in hops of at most this many ticks.</summary>
     public int SeekStepTicks { get; set; } = 20000;
     public double HopSettleSeconds { get; set; } = 6;
+
+    /// <summary>
+    /// Playback before each segment that's recorded but cut: after a jump the game stutters for a few seconds while it
+    /// catches up, and only settles once it's playing.
+    /// </summary>
+    public double PreRollSeconds { get; set; } = 5;
     public double DemoSettleSeconds { get; set; } = 10;
     public double LaunchTimeoutSeconds { get; set; } = 120;
 
@@ -37,7 +45,7 @@ public sealed class RenderOptions
     public string AssetCacheDir { get; set; } = "";
 }
 
-/// <summary>A kill within the clip, at a time relative to the clip start (the death event tick).</summary>
+/// <summary>A kill within the clip, at a time relative to the finished clip's start (the death event tick).</summary>
 public sealed record KillMark(double OffsetSeconds, string Label, bool IsFinal, string VictimName = "", int VictimHeroId = 0);
 
 /// <summary>Everything needed to render one highlight. Plain data so it can be sent to a remote worker later.</summary>
@@ -57,9 +65,16 @@ public sealed record RenderJob(
     string PlayerName = "",
     int PlayerHeroId = 0,
     // "DOUBLE KILL", "TRIPLE KILL", …
-    string HighlightLabel = "")
+    string HighlightLabel = "",
+    // Pieces of the demo recorded one after another and joined (a kill compilation). Null: just StartTick..EndTick.
+    IReadOnlyList<ClipSegment>? Segments = null)
 {
-    public double DurationSeconds => (EndTick - StartTick) / TickRate;
+    public IReadOnlyList<ClipSegment> ClipSegments => Segments is { Count: > 0 } s ? s : [new ClipSegment(StartTick, EndTick)];
+
+    public double SegmentSeconds(ClipSegment s) => (s.EndTick - s.StartTick) / TickRate;
+
+    /// <summary>Length of the finished clip: all segments back to back.</summary>
+    public double DurationSeconds => ClipSegments.Sum(SegmentSeconds);
 }
 
 public enum RenderStage

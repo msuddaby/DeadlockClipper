@@ -17,7 +17,7 @@ public enum OverlayAnimation
 /// <param name="Index">For kills: 0-based kill index within the clip.</param>
 public sealed record OverlayCue(OverlayKind Kind, int Index, double Start, double End, OverlayAnimation Animation);
 
-public sealed record OverlayTimelinePlan(IReadOnlyList<OverlayCue> Cues, IReadOnlyList<double> Flashes);
+public sealed record OverlayTimelinePlan(IReadOnlyList<OverlayCue> Cues);
 
 /// <summary>
 /// When each overlay graphic is on screen (the chosen style: intro card from mockup A, kill slashes and the
@@ -31,7 +31,6 @@ public static class OverlayTimeline
     public const double IntroStart = 0.2, IntroEnd = 3.0;
     public const double KillHold = 1.1, LastKillHold = 0.9;
     public const double FinalLag = 0.15, FinalHold = 2.45;
-    public const double FlashLength = 0.07;
 
     public static OverlayTimelinePlan Plan(RenderJob job)
     {
@@ -45,7 +44,6 @@ public static class OverlayTimeline
             cues.Add(new OverlayCue(OverlayKind.Intro, 0, IntroStart, introEnd, OverlayAnimation.SlideFromLeft));
 
         var kills = job.KillMarks.OrderBy(k => k.OffsetSeconds).ToList();
-        var flashes = new List<double>();
         for (var i = 0; i < kills.Count; i++)
         {
             var start = kills[i].OffsetSeconds + MarkerDelay;
@@ -56,7 +54,6 @@ public static class OverlayTimeline
             end = Math.Min(end, duration);
             if (end - start < 0.15) continue;
             cues.Add(new OverlayCue(OverlayKind.Kill, i, start, end, OverlayAnimation.SlideFromLeft));
-            flashes.Add(start);
         }
 
         if (kills.Count >= 2)
@@ -66,6 +63,6 @@ public static class OverlayTimeline
             if (end - start >= 0.5) cues.Add(new OverlayCue(OverlayKind.Final, 0, start, end, OverlayAnimation.SlideFromRight));
         }
 
-        return new OverlayTimelinePlan(cues, flashes);
+        return new OverlayTimelinePlan(cues);
     }
 }

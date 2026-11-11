@@ -9,6 +9,8 @@ public enum DemoSource
 
 public enum DemoStatus
 {
+    // Fetching the replay from Valve (DemoSource.MatchId); then Queued for parsing.
+    Downloading,
     Queued,
     Parsing,
     Done,
@@ -71,4 +73,46 @@ public sealed class ClipRender
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
+}
+
+public enum MetadataStatus
+{
+    Pending,
+    Done,
+    // Valve no longer has the metadata for this match.
+    Unavailable,
+    Failed,
+}
+
+/// <summary>
+/// A match from a player's history, scored from its metadata (no demo needed) so the best ones can be downloaded.
+/// </summary>
+public sealed class ScannedMatch
+{
+    public long MatchId { get; set; }
+    /// <summary>The player whose history this came from and whose highlights are scored (SteamID64).</summary>
+    public long PlayerSteamId { get; set; }
+
+    public DateTimeOffset StartTime { get; set; }
+    public int DurationSeconds { get; set; }
+    public int HeroId { get; set; }
+    public int Kills { get; set; }
+    public int Deaths { get; set; }
+    public int Assists { get; set; }
+    public int NetWorth { get; set; }
+
+    public MetadataStatus MetadataStatus { get; set; }
+    public string? Error { get; set; }
+    /// <summary>Sum of the player's multikill scores; 0 with none. Null until the metadata is in.</summary>
+    public double? Score { get; set; }
+    /// <summary>Serialized List&lt;MatchHighlightDto&gt;.</summary>
+    public string? HighlightsJson { get; set; }
+    // Download coordinates from the GC, kept from the metadata scan so downloading the demo costs no GC request.
+    public int? ClusterId { get; set; }
+    public long? ReplaySalt { get; set; }
+    public long? MetadataSalt { get; set; }
+
+    /// <summary>When Valve deletes the replay (from the Game Coordinator).</summary>
+    public DateTimeOffset? ReplayValidThrough { get; set; }
+    public DateTimeOffset? ScannedAt { get; set; }
 }

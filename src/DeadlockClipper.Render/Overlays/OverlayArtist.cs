@@ -5,7 +5,7 @@ namespace DeadlockClipper.Render.Overlays;
 
 public sealed record OverlayLayer(OverlayCue Cue, string PngPath);
 
-public sealed record OverlayRender(IReadOnlyList<OverlayLayer> Layers, IReadOnlyList<double> Flashes);
+public sealed record OverlayRender(IReadOnlyList<OverlayLayer> Layers);
 
 public interface IOverlayArtist
 {
@@ -49,7 +49,7 @@ public sealed class OverlayArtist(RenderOptions options, IProcessRunner runner, 
                 await ScreenshotAsync(htmlPath, pngPath, profile, ct);
                 layers.Add(new OverlayLayer(cue, pngPath));
             }
-            return new OverlayRender(layers, timeline.Flashes);
+            return new OverlayRender(layers);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

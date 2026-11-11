@@ -124,9 +124,8 @@ public static class Endpoints
             return Results.Accepted($"/api/demos/{demo.Id}", ToSummary(demo, queue));
         });
 
-        // Follow-up: resolve the replay URL for a match id (deadlock-api.com salts), download, decompress, enqueue.
-        api.MapPost("/demos/from-match/{matchId:long}", (long matchId) =>
-            Results.Problem("Downloading by match ID is not implemented yet.", statusCode: StatusCodes.Status501NotImplemented));
+        // Download by match id: salts from the Game Coordinator, the replay from Valve, then parse (see MatchEndpoints).
+        api.MapPost("/demos/from-match/{matchId:long}", MatchEndpoints.StartDownloadAsync);
 
         api.MapGet("/heroes", (HeroCatalog heroes) => heroes.All.Values.OrderBy(h => h.Name));
     }
@@ -194,12 +193,12 @@ public static class Endpoints
         return Results.Problem("No file in upload.", statusCode: 400);
     }
 
-    private static DemoSummaryDto ToSummary(Demo d, ParseQueue queue) => new(
+    internal static DemoSummaryDto ToSummary(Demo d, ParseQueue queue) => new(
         d.Id, d.FileName, d.Source, d.SizeBytes, d.MatchId, d.Status,
         d.Status switch
         {
             DemoStatus.Done => 1,
-            DemoStatus.Parsing or DemoStatus.Queued => queue.ProgressOf(d.Id) ?? 0,
+            DemoStatus.Downloading or DemoStatus.Parsing or DemoStatus.Queued => queue.ProgressOf(d.Id) ?? 0,
             _ => null,
         },
         d.Error, d.Map, d.DurationSeconds, d.HighlightCount, d.CreatedAt, d.ParsedAt);

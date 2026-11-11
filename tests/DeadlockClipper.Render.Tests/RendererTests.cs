@@ -17,7 +17,7 @@ public class RendererTests
         public string? LoadedDemo { get; set; }
         public int CurrentTick { get; set; }
 
-        public Task LaunchAsync(CancellationToken ct)
+        public Task LaunchAsync(CancellationToken ct, IProgress<string>? status = null)
         {
             Launches++;
             IsLaunched = Alive = true;
@@ -73,10 +73,14 @@ public class RendererTests
     private sealed class FakeFinisher : IClipFinisher
     {
         public List<string> Finished { get; } = [];
+        public List<int> RecordingCounts { get; } = [];
+        public List<double> PreRolls { get; } = [];
 
-        public Task FinishAsync(RenderJob job, RawRecording raw, string workDir, CancellationToken ct)
+        public Task FinishAsync(RenderJob job, IReadOnlyList<RawRecording> raws, string workDir, CancellationToken ct)
         {
             Finished.Add(job.JobId);
+            RecordingCounts.Add(raws.Count);
+            PreRolls.AddRange(raws.Select(r => r.PreRollSeconds));
             return Task.CompletedTask;
         }
     }
@@ -84,9 +88,9 @@ public class RendererTests
     private static RenderJob Job(string id, int start, int end, int slot = 12, string demo = "demo1") =>
         new(id, demo, $"/replays/{demo}.dem", $"h-{id}", start, end, 64, slot, "T", "S", [], $"/out/{id}.mp4");
 
-    private static (Renderer, FakeGame, FakeFinisher) Create()
+    private static (Renderer, FakeGame, FakeFinisher) Create(double preRollSeconds = 0)
     {
-        var options = new RenderOptions { SeekStepTicks = 20000, WorkDir = Path.GetTempPath() };
+        var options = new RenderOptions { SeekStepTicks = 20000, WorkDir = Path.GetTempPath(), PreRollSeconds = preRollSeconds };
         var game = new FakeGame();
         var finisher = new FakeFinisher();
         var renderer = new Renderer(options, game, new FakeRecorder(game), finisher,
@@ -173,6 +177,78 @@ public class RendererTests
         Assert.True(results[1].Success);
         Assert.Equal(["b"], finisher.Finished);
     }
+
+    [Fact]
+    public async Task SegmentedJob_RecordsEachSegmentInOnePass()
+    {
+        var (renderer, game, finisher) = Create();
+        var job = Job("comp", 30000, 61000) with
+        {
+            Segments = [new(30000, 30400), new(45000, 45400), new(60600, 61000)],
+        };
+
+        var results = await renderer.RenderBatchAsync([job], null, default);
+
+        Assert.True(results.Single().Success);
+        Assert.Equal([3], finisher.RecordingCounts);
+        Assert.Equal(1, game.Log.Count(l => l.StartsWith("playdemo")));
+        Assert.Equal(
+            ["demo_gototick 20000", "demo_gototick 30000", "demo_gototick 45000", "demo_gototick 60600"],
+            game.Log.Where(l => l.StartsWith("demo_gototick")));
+        Assert.Equal(3, game.Log.Count(l => l == "<record>"));
+        Assert.Equal(3, game.Log.Count(l => l == "citadel_spectate_topbar_player 12"));
+    }
+
+    [Fact]
+    public async Task SegmentedJobs_RenderAfterSingleClipsSoTheyShareAPass()
+    {
+        var (renderer, game, finisher) = Create();
+        var comp = Job("comp", 10000, 61000) with { Segments = [new(10000, 10400), new(60600, 61000)] };
+
+        await renderer.RenderBatchAsync([comp, Job("a", 20000, 20500), Job("b", 40000, 40500)], null, default);
+
+        Assert.Equal(["a", "b", "comp"], finisher.Finished);
+    }
+
+    [Fact]
+    public async Task PreRoll_StartsPlaybackFiveSecondsEarly_AndTellsTheFinisherToCutIt()
+    {
+        var (renderer, game, finisher) = Create(preRollSeconds: 5);
+
+        await renderer.RenderBatchAsync([Job("a", 98431, 99400)], null, default);
+
+        // 5 s at 64 tick = 320 ticks before the clip.
+        Assert.Equal("demo_gototick 98111", game.Log.Last(l => l.StartsWith("demo_gototick")));
+        Assert.Equal([5.0], finisher.PreRolls);
+    }
+
+    [Fact]
+    public async Task PreRoll_PlaysThroughShortGapsBetweenSegments_InsteadOfJumping()
+    {
+        var (renderer, game, finisher) = Create(preRollSeconds: 5);
+        // Segment 2 starts 3 s (192 ticks) after segment 1 ends; segment 3 is far away.
+        var job = Job("comp", 30000, 61000) with
+        {
+            Segments = [new(30000, 30400), new(30592, 31000), new(60600, 61000)],
+        };
+
+        await renderer.RenderBatchAsync([job], null, default);
+
+        Assert.Equal(
+            ["demo_gototick 20000", "demo_gototick 29680", "demo_gototick 51000", "demo_gototick 60280"],
+            game.Log.Where(l => l.StartsWith("demo_gototick")));
+        Assert.Equal([5.0, 3.0, 5.0], finisher.PreRolls);
+        Assert.Equal(1, game.Log.Count(l => l.StartsWith("playdemo")));
+    }
+
+    [Theory]
+    [InlineData(1000, true, 1100, 320, 1000)]   // just before: play through the gap
+    [InlineData(1000, true, 2000, 320, 1680)]   // far ahead: jump to 5 s before
+    [InlineData(1000, false, 1100, 320, 780)]   // demo not loaded: can't play through
+    [InlineData(5000, true, 1100, 320, 780)]    // behind us: jump (the planner reloads)
+    [InlineData(0, true, 100, 320, 0)]          // start of the demo
+    public void PlayFrom(int current, bool loaded, int start, int preRoll, int expected) =>
+        Assert.Equal(expected, SeekPlanner.PlayFrom(current, loaded, start, preRoll));
 
     /// <summary>Progress&lt;T&gt; posts to the thread pool; the test needs synchronous callbacks.</summary>
     private sealed class SyncProgress(Action<RenderProgress> onReport) : IProgress<RenderProgress>

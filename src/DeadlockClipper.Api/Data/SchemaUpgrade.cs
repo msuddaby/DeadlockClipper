@@ -35,6 +35,39 @@ public static class SchemaUpgrade
                 """);
         }
 
+        if (!TableExists(db, "Matches"))
+        {
+            db.Database.ExecuteSqlRaw("""
+                CREATE TABLE "Matches" (
+                    "MatchId" INTEGER NOT NULL CONSTRAINT "PK_Matches" PRIMARY KEY,
+                    "PlayerSteamId" INTEGER NOT NULL,
+                    "StartTime" INTEGER NOT NULL,
+                    "DurationSeconds" INTEGER NOT NULL,
+                    "HeroId" INTEGER NOT NULL,
+                    "Kills" INTEGER NOT NULL,
+                    "Deaths" INTEGER NOT NULL,
+                    "Assists" INTEGER NOT NULL,
+                    "NetWorth" INTEGER NOT NULL,
+                    "MetadataStatus" TEXT NOT NULL,
+                    "Error" TEXT NULL,
+                    "Score" REAL NULL,
+                    "HighlightsJson" TEXT NULL,
+                    "ReplayValidThrough" INTEGER NULL,
+                    "ScannedAt" INTEGER NULL
+                );
+                CREATE INDEX "IX_Matches_PlayerSteamId_StartTime" ON "Matches" ("PlayerSteamId", "StartTime");
+                CREATE INDEX "IX_Matches_MetadataStatus" ON "Matches" ("MetadataStatus");
+                """);
+        }
+
+        if (!ColumnExists(db, "Matches", "ClusterId"))
+        {
+            db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" ADD COLUMN "ClusterId" INTEGER NULL;""");
+            db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" ADD COLUMN "ReplaySalt" INTEGER NULL;""");
+        }
+        if (!ColumnExists(db, "Matches", "MetadataSalt"))
+            db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" ADD COLUMN "MetadataSalt" INTEGER NULL;""");
+
         if (!ColumnExists(db, "Demos", "AnalysisVersion"))
             db.Database.ExecuteSqlRaw("""ALTER TABLE "Demos" ADD COLUMN "AnalysisVersion" INTEGER NOT NULL DEFAULT 0;""");
     }

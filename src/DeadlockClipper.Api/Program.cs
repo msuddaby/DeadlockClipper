@@ -32,6 +32,21 @@ builder.Services.AddSingleton<ParseQueue>();
 builder.Services.AddHostedService<ParseWorker>();
 
 builder.Services.AddHttpClient();
+// Valve's replay servers; demos are hundreds of MB, so no overall timeout.
+builder.Services.AddHttpClient("replays", c => c.Timeout = Timeout.InfiniteTimeSpan);
+
+// Match scanning and replay downloads go through secondary Steam accounts' Game Coordinator sessions.
+builder.Services.AddSingleton(builder.Configuration.GetSection($"{ClipperOptions.Section}:Steam").Get<DeadlockClipper.Steam.SteamOptions>()
+                              ?? new DeadlockClipper.Steam.SteamOptions());
+// TEMPORARY: logs every GC request so the undocumented rate limit can be measured (GET /api/steam/quota).
+builder.Services.AddSingleton(sp => new DeadlockClipper.Steam.QuotaLog(
+    Path.Combine(sp.GetRequiredService<DemoStorage>().DataDir, "gc-quota-log.jsonl")));
+builder.Services.AddSingleton<DeadlockClipper.Steam.GcPool>();
+builder.Services.AddSingleton<DeadlockClipper.Steam.SteamLogins>();
+builder.Services.AddSingleton<MatchScanQueue>();
+builder.Services.AddHostedService<MatchScanWorker>();
+builder.Services.AddSingleton<DownloadQueue>();
+builder.Services.AddHostedService<DownloadWorker>();
 builder.Services.AddSingleton<HeroCatalog>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<HeroCatalog>());
 
@@ -80,6 +95,7 @@ using (var scope = app.Services.CreateScope())
 
 app.MapClipperApi();
 app.MapRenderApi();
+app.MapMatchApi();
 
 // Serve the built frontend (web/dist copied to wwwroot) when not using the Vite dev server.
 app.UseDefaultFiles();

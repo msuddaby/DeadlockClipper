@@ -4,7 +4,7 @@ import { api, type DemoSummary } from '../api'
 import UploadDropzone from '../components/UploadDropzone'
 import { formatBytes, formatClock, formatDate } from '../format'
 
-const isBusy = (d: DemoSummary) => d.status === 'Queued' || d.status === 'Parsing'
+const isBusy = (d: DemoSummary) => d.status === 'Downloading' || d.status === 'Queued' || d.status === 'Parsing'
 
 export default function DemosPage() {
   const queryClient = useQueryClient()
@@ -22,6 +22,7 @@ export default function DemosPage() {
   const importLocal = useMutation({ mutationFn: api.importLocal, onSuccess: refresh })
   const remove = useMutation({ mutationFn: api.deleteDemo, onSuccess: refresh })
   const reparse = useMutation({ mutationFn: api.reparse, onSuccess: refresh })
+  const cancelDownload = useMutation({ mutationFn: api.cancelDownload, onSuccess: refresh })
 
   return (
     <div className="stack">
@@ -100,7 +101,7 @@ export default function DemosPage() {
                       {d.matchId ? `Match ${d.matchId}` : d.fileName}
                     </Link>
                     <div className="muted small">
-                      {d.source === 'LocalReplay' ? 'Local replay' : d.source} · {formatBytes(d.sizeBytes)}
+                      {d.source === 'LocalReplay' ? 'Local replay' : d.source === 'MatchId' ? 'Downloaded' : d.source} · {formatBytes(d.sizeBytes)}
                     </div>
                   </td>
                   <td>
@@ -110,7 +111,12 @@ export default function DemosPage() {
                   <td>{d.highlightCount ?? '–'}</td>
                   <td className="small">{formatDate(d.createdAt)}</td>
                   <td className="actions">
-                    {(d.status === 'Failed' || d.status === 'Done') && (
+                    {d.status === 'Downloading' && (
+                      <button className="button ghost danger" onClick={() => cancelDownload.mutate(d.id)}>
+                        Cancel
+                      </button>
+                    )}
+                    {(d.status === 'Failed' || d.status === 'Done') && d.sizeBytes > 0 && (
                       <button className="button ghost" onClick={() => reparse.mutate(d.id)}>
                         Re-parse
                       </button>
@@ -130,12 +136,13 @@ export default function DemosPage() {
 }
 
 function StatusCell({ demo }: { demo: DemoSummary }) {
-  if (demo.status === 'Parsing' || demo.status === 'Queued') {
+  if (isBusy(demo)) {
     return (
       <div className="status-progress">
         <span className={`badge ${demo.status.toLowerCase()}`}>{demo.status}</span>
         <progress value={demo.progress ?? 0} max={1} />
         <span className="small muted">{Math.round((demo.progress ?? 0) * 100)}%</span>
+        {demo.error && <span className="small muted">{demo.error}</span>}
       </div>
     )
   }

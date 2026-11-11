@@ -33,5 +33,6 @@ export function renderStatusText(r: RenderInfo): string {
   if (r.status === 'Failed') return 'Failed'
   if (r.stage === 'Queued' && r.detail) return r.detail
   if (!r.stage) return r.status === 'Queued' ? 'Queued' : 'Rendering'
+  if (r.stage === 'Launching' && r.detail) return r.detail // e.g. "Steam is updating Deadlock"
   return `${stageLabel[r.stage]}${r.detail ? ` ${r.detail}` : ''}`
 }

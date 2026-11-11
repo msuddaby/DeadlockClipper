@@ -44,10 +44,33 @@ dotnet run --project src/DeadlockClipper.Api     # UI and API on http://localhos
 For frontend development, run `pnpm --dir web dev` (http://localhost:5173, proxies `/api`) alongside the API.
 
 Typical flow:
-1. Finish a match and open the replay in-game, which downloads it.
-2. In the app, **Import** it from Local replays.
-3. Click ☆ next to your name.
-4. Click **Render all mine**. Clips appear on the demo page and under **Clips**, and are saved to `~/Videos/Deadlock Clips/<match>/`.
+1. Get the demo: either open the replay in-game and **Import** it from Local replays, or find it under
+   **Matches** (below) and click **Download**.
+2. Click ☆ next to your name.
+3. Click **Render all mine**. Clips appear on the demo page and under **Clips**, and are saved to `~/Videos/Deadlock Clips/<match>/`.
+
+### Finding matches without downloading demos
+
+**Matches** lists your recent games scored from Valve's small match metadata files (every death with killer and
+time), so you can see which ones have multikills before downloading a 200-400 MB replay. It talks to Deadlock's
+Game Coordinator directly through **secondary Steam accounts** (Steam allows one in-game session per account, so
+never your main one). Each account needs Deadlock in its library.
+
+1. Under **Matches → Clipper accounts**, click **Add account** and sign in (Steam Guard code or approval in the Steam
+   app). The password goes straight to Steam; only a refresh token is saved, owner-only, in
+   `~/.config/deadlock-clipper/steam-accounts/`. (`dotnet run --project src/DeadlockClipper.Steam.Cli -- login` does
+   the same from a terminal.)
+2. From your main account, send one of them a Steam friend request (Valve only shares match history with friends).
+   It's accepted automatically the next time that account connects.
+3. Enter your SteamID64 and click **Scan match history**, then **Load older matches** for more.
+
+Valve rate-limits match metadata per account and doesn't document the limit. The one published measurement is about
+17 requests per 30 minutes ([DeadlockAnalytics #15](https://github.com/Maxalon/DeadlockAnalytics/pull/15)), so each
+account makes one request every 110 s (~30 matches an hour); add accounts to scan faster. Matches with under 2 kills
+are scored without a request, and still-downloadable, high-kill matches go first. Replays expire about three weeks
+after a match.
+
+The same CLI has `history`, `salts`, `meta` and `download` commands for debugging.
 
 ## Config (`src/DeadlockClipper.Api/appsettings.json`)
 
@@ -56,9 +79,13 @@ Typical flow:
 | `Clipper:DataDir` | `data` | SQLite db, uploaded demos, hero cache, render scratch space |
 | `Clipper:ReplaysDir` | Deadlock `game/citadel/replays` | Listed under "Local replays"; imported in place, never copied or deleted |
 | `Clipper:HeroesUrl` | assets.deadlock-api.com | Hero id → name, cached to `data/heroes.json` |
+| `Clipper:Steam:AccountsDir` | `~/.config/deadlock-clipper/steam-accounts` | Saved logins for the clipper Steam accounts |
+| `Clipper:Steam:MetadataIntervalSeconds` | 110 | Minimum gap between metadata requests per account |
+| `Clipper:Steam:IdleDisconnectSeconds` | 120 | Log an account off Steam after this long without requests |
 | `Clipper:Render:GameDir` | parent of `ReplaysDir` | Deadlock's `game/citadel` folder |
 | `Clipper:Render:OutputDir` | `~/Videos/Deadlock Clips` | Finished clips |
 | `Clipper:Render:Width` / `Height` / `Fps` | 1920 / 1080 / 60 | Render resolution |
+| `Clipper:Render:PreRollSeconds` | 5 | Playback before each clip/segment that's recorded then cut, so the post-jump stutter isn't in the clip |
 | `Clipper:Render:VideoEncoder` | `vah264enc` | GStreamer encoder for the raw capture (`x264enc` for CPU) |
 
 ## Tests
@@ -75,5 +102,4 @@ dotnet run --project src/DeadlockClipper.Render.Cli -- <game/citadel/replays/mat
 
 1. Remote render workers: host `DeadlockClipper.Render` on GPU boxes with their own Steam accounts.
 2. Vertical 9:16 clips composited from HUD regions (hero portrait, kill feed, gameplay).
-3. Paste a match ID to download the demo from Valve (`POST /api/demos/from-match/{id}` is stubbed and returns 501).
-4. Auto mode: render your highlights automatically when a new replay appears.
+3. Auto mode: render your highlights automatically when a new replay appears.

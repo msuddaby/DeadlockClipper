@@ -13,7 +13,7 @@ import {
   type Team,
 } from '../api'
 import HealthBanner from '../components/HealthBanner'
-import { formatClock, highlightLabel, useHeroNames, useMe } from '../format'
+import { compilationId, formatClock, highlightLabel, useHeroNames, useMe } from '../format'
 import { renderStatusText, useRenderHealth, useRenders } from '../renders'
 
 export default function DemoPage() {
@@ -24,7 +24,7 @@ export default function DemoPage() {
     enabled: !!id,
     refetchInterval: (q) => {
       const s = q.state.data?.demo.status
-      return s === 'Queued' || s === 'Parsing' ? 1000 : false
+      return s === 'Downloading' || s === 'Queued' || s === 'Parsing' ? 1000 : false
     },
   })
 
@@ -56,19 +56,58 @@ export default function DemoPage() {
         <span className={`badge ${demo.status.toLowerCase()}`}>{demo.status}</span>
       </div>
 
-      {(demo.status === 'Queued' || demo.status === 'Parsing') && (
+      {(demo.status === 'Downloading' || demo.status === 'Queued' || demo.status === 'Parsing') && (
         <div className="card">
-          <p>Parsing demo… {Math.round((demo.progress ?? 0) * 100)}%</p>
+          <p>
+            {demo.status === 'Downloading' ? 'Downloading replay from Valve' : 'Parsing demo'}…{' '}
+            {Math.round((demo.progress ?? 0) * 100)}%
+          </p>
+          {demo.status === 'Downloading' && demo.error && <p className="muted small">{demo.error}</p>}
+          {demo.status === 'Downloading' && <DownloadControls demoId={demo.id} matchId={demo.matchId} failed={false} />}
           <progress value={demo.progress ?? 0} max={1} className="wide" />
         </div>
       )}
       {demo.status === 'Failed' && (
         <div className="card">
-          <p className="error">Parsing failed: {demo.error}</p>
+          <p className="error">
+            {demo.error?.startsWith('Download') ? demo.error : `Parsing failed: ${demo.error}`}
+          </p>
+          {demo.source === 'MatchId' && demo.sizeBytes === 0 && (
+            <DownloadControls demoId={demo.id} matchId={demo.matchId} failed />
+          )}
         </div>
       )}
       {analysis && demo.status === 'Done' && <HealthBanner />}
       {analysis && <Analysis analysis={analysis} demoId={demo.id} />}
+    </div>
+  )
+}
+
+/** Cancel a running download, or retry one that failed or was cancelled. */
+function DownloadControls({ demoId, matchId, failed }: { demoId: string; matchId: number | null; failed: boolean }) {
+  const queryClient = useQueryClient()
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['demo', demoId] })
+    queryClient.invalidateQueries({ queryKey: ['demos'] })
+    queryClient.invalidateQueries({ queryKey: ['matches'] })
+  }
+  const cancel = useMutation({ mutationFn: () => api.cancelDownload(demoId), onSuccess: refresh })
+  const retry = useMutation({ mutationFn: () => api.downloadMatch(matchId!), onSuccess: refresh })
+  const error = (cancel.error ?? retry.error) as Error | null
+  return (
+    <div className="inline-form">
+      {failed ? (
+        matchId != null && (
+          <button className="button" disabled={retry.isPending} onClick={() => retry.mutate()}>
+            Retry download
+          </button>
+        )
+      ) : (
+        <button className="button ghost danger" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+          Cancel download
+        </button>
+      )}
+      {error && <span className="error small">{error.message}</span>}
     </div>
   )
 }
@@ -159,6 +198,16 @@ function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: strin
           </ul>
         )}
       </section>
+
+      <Compilations
+        analysis={analysis}
+        demoId={demoId}
+        onlySteamId={filterToMe ? me : null}
+        rendersByHighlight={rendersByHighlight}
+        canRender={canRender}
+        onChanged={refreshRenders}
+        heroName={heroName}
+      />
 
       <KillFeed kills={analysis.kills} heroName={heroName} me={me} />
     </>
@@ -290,6 +339,125 @@ function HighlightRow({
             </li>
           ))}
         </ul>
+      )}
+    </li>
+  )
+}
+
+/** One clip per player of all their hero kills, spliced together. */
+function Compilations({
+  analysis,
+  demoId,
+  onlySteamId,
+  rendersByHighlight,
+  canRender,
+  onChanged,
+  heroName,
+}: {
+  analysis: MatchAnalysis
+  demoId: string
+  onlySteamId: string | null
+  rendersByHighlight: Map<string, RenderInfo>
+  canRender: boolean
+  onChanged: () => void
+  heroName: (id: number) => string
+}) {
+  const rows = useMemo(() => {
+    const kills = new Map<string, number>()
+    for (const k of analysis.kills)
+      if (k.attackerSteamId && k.attackerSteamId !== k.victimSteamId)
+        kills.set(k.attackerSteamId, (kills.get(k.attackerSteamId) ?? 0) + 1)
+    return analysis.players
+      .map((p) => ({ player: p, kills: kills.get(p.steamId) ?? 0 }))
+      .filter((r) => r.kills >= 2 && (!onlySteamId || r.player.steamId === onlySteamId))
+      .sort((a, b) => b.kills - a.kills)
+  }, [analysis, onlySteamId])
+
+  return (
+    <section className="card">
+      <div className="section-head">
+        <h2>Kill compilations</h2>
+      </div>
+      {rows.length === 0 ? (
+        <p className="muted">Nobody{onlySteamId ? ' (you included)' : ''} has 2+ hero kills to compile.</p>
+      ) : (
+        <ul className="list">
+          {rows.map(({ player, kills }) => (
+            <CompilationRow
+              key={player.steamId}
+              player={player}
+              kills={kills}
+              demoId={demoId}
+              render={rendersByHighlight.get(compilationId(player.steamId))}
+              canRender={canRender}
+              onChanged={onChanged}
+              heroName={heroName}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function CompilationRow({
+  player,
+  kills,
+  demoId,
+  render,
+  canRender,
+  onChanged,
+  heroName,
+}: {
+  player: PlayerInfo
+  kills: number
+  demoId: string
+  render: RenderInfo | undefined
+  canRender: boolean
+  onChanged: () => void
+  heroName: (id: number) => string
+}) {
+  const [open, setOpen] = useState(false)
+  const start = useMutation({ mutationFn: () => api.renderCompilation(demoId, player.steamId), onSuccess: onChanged })
+  const ready = render?.status === 'Done' && render.hasVideo
+  return (
+    <li className="highlight">
+      <div className="highlight-row">
+        <button className="highlight-main" onClick={() => setOpen((o) => !o)} disabled={!ready}>
+          <span className="badge hl-killcompilation">{kills} kills</span>
+          <span>
+            <strong>{player.name}</strong> <span className="muted">({heroName(player.heroId)})</span>
+          </span>
+          {ready && <span className="muted small">{open ? '▾' : '▸'}</span>}
+        </button>
+        <div className="highlight-actions">
+          {!render || render.status === 'Failed' ? (
+            <button
+              className="button ghost"
+              disabled={!canRender || start.isPending}
+              title={render?.error ?? undefined}
+              onClick={() => start.mutate()}
+            >
+              {render?.status === 'Failed' ? 'Retry' : 'Render'}
+            </button>
+          ) : ready ? (
+            <button className="button" onClick={() => setOpen(true)}>
+              ▶ Watch
+            </button>
+          ) : (
+            <span className={`badge ${render.status === 'Rendering' ? 'parsing' : 'queued'}`}>{renderStatusText(render)}</span>
+          )}
+        </div>
+      </div>
+      {start.error && <p className="error small render-error">{(start.error as Error).message}</p>}
+      {render?.status === 'Failed' && render.error && <p className="error small render-error">Render failed: {render.error}</p>}
+      {open && ready && (
+        <div className="clip-player">
+          <video src={previewUrl(render.id)} controls preload="metadata" />
+          <a className="small" href={videoUrl(render.id)} download>
+            Download clip
+          </a>
+        </div>
       )}
     </li>
   )

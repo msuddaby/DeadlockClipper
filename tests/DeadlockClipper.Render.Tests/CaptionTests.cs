@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DeadlockClipper.Core.Highlights;
 using DeadlockClipper.Core.Parsing;
 using DeadlockClipper.Render;
 
@@ -107,6 +108,64 @@ public class CaptionTests
             var err = await p.StandardError.ReadToEndAsync();
             await p.WaitForExitAsync();
             Assert.True(p.ExitCode == 0, err);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void CompilationJob_TimesKillsOnTheJoinedTimeline()
+    {
+        var (analysis, _) = CsgDoubleKill();
+        KillEvent Kill(int tick) => new(tick, tick / 64.0, Csg, "Counter Strike Genius (150 iq)", 64, 1, "v", 2, "", []);
+        var kills = new[] { Kill(10_000), Kill(10_200), Kill(50_000) };
+        var compilation = KillCompilation.Build(analysis with { Kills = kills }, Csg)!;
+
+        var job = CaptionPlan.CreateJob("j1", "demo", "/x.dem", analysis, compilation, "/out.mp4", _ => "Holliday");
+
+        // Segments: 9744..10328 (9.125 s) then 49744..50128 (6 s).
+        Assert.Equal([new ClipSegment(9744, 10328), new ClipSegment(49744, 50128)], job.Segments);
+        Assert.Equal(15.125, job.DurationSeconds, 3);
+        Assert.Equal([4.0, 7.12, 13.12], job.KillMarks.Select(k => k.OffsetSeconds));
+        Assert.Equal(["KILL", "KILL", "3 KILLS"], job.KillMarks.Select(k => k.Label));
+        Assert.Equal("3 KILLS", job.HighlightLabel);
+        Assert.Equal("Holliday  ·  Kill Compilation  ·  3 kills  ·  Match 135555232", job.IntroSubtitle);
+    }
+
+    /// <summary>The real ffmpeg command on synthetic recordings: segments joined, plain captions, one without audio.</summary>
+    [Fact]
+    public async Task Finisher_JoinsSegmentsToThePlannedLength()
+    {
+        if (!CanRun("ffmpeg") || !CanRun("ffprobe")) return;
+
+        var dir = Path.Combine(Path.GetTempPath(), $"clipper-join-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var runner = new ProcessRunner();
+            var raws = new List<RawRecording>();
+            for (var i = 0; i < 3; i++)
+            {
+                var v = Path.Combine(dir, $"v{i}.mp4");
+                var a = Path.Combine(dir, $"a{i}.wav");
+                Assert.True((await runner.RunAsync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=4",
+                    "-c:v", "libx264", "-preset", "ultrafast", v])).Success);
+                if (i != 1)
+                    Assert.True((await runner.RunAsync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", "-ac", "2", a])).Success);
+                raws.Add(new RawRecording(v, a));
+            }
+
+            var job = new RenderJob("j", "d", "/x.dem", "h", 0, 3000, 64, 1, "TITLE", "sub",
+                [new KillMark(1, "KILL", false), new KillMark(7, "3 KILLS", true)], Path.Combine(dir, "out", "clip.mp4"),
+                Segments: [new ClipSegment(0, 192), new ClipSegment(1000, 1160), new ClipSegment(2000, 2224)]);
+            var options = new RenderOptions { Fps = 30, Width = 640, Height = 360, CaptionStyle = "plain" };
+
+            await new ClipFinisher(options, runner).FinishAsync(job, raws, dir, default);
+
+            var probe = await runner.RunAsync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", job.OutputPath]);
+            Assert.Equal(job.DurationSeconds, double.Parse(probe.StdOut.Trim(), System.Globalization.CultureInfo.InvariantCulture), 1);
         }
         finally
         {

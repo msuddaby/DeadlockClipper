@@ -6,6 +6,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<Demo> Demos => Set<Demo>();
     public DbSet<ClipRender> Renders => Set<ClipRender>();
+    public DbSet<ScannedMatch> Matches => Set<ScannedMatch>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -31,5 +32,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         render.Property(r => r.FinishedAt).HasConversion(toMsNullable);
         render.HasIndex(r => new { r.DemoId, r.HighlightId });
         render.HasIndex(r => r.Status);
+
+        var match = b.Entity<ScannedMatch>();
+        match.ToTable("Matches");
+        match.HasKey(m => m.MatchId);
+        match.Property(m => m.MatchId).ValueGeneratedNever();
+        match.Property(m => m.MetadataStatus).HasConversion<string>();
+        match.Property(m => m.StartTime).HasConversion(toMs);
+        match.Property(m => m.ReplayValidThrough).HasConversion(toMsNullable);
+        match.Property(m => m.ScannedAt).HasConversion(toMsNullable);
+        match.HasIndex(m => new { m.PlayerSteamId, m.StartTime });
+        match.HasIndex(m => m.MetadataStatus);
     }
 }

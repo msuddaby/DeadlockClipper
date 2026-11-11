@@ -53,12 +53,18 @@ public static class ClipComposer
     }
 
     /// <summary>
-    /// Filter graph for the styled overlays. Input 0 is the video; the overlay PNGs are inputs
-    /// <paramref name="firstOverlayInput"/>.. in layer order, each looped for the clip's length. Output label: [vout].
+    /// Filter graph for the styled overlays. <paramref name="input"/> is the video stream; the overlay PNGs are inputs
+    /// <paramref name="firstOverlayInput"/>.. in layer order, each looped for <see cref="OverlayInputSeconds"/> (only
+    /// while it's on screen) and shifted to its cue start here. Output label: [vout].
     /// </summary>
-    public static string BuildOverlayGraph(Overlays.OverlayRender overlays, int fps, int width, int height, int firstOverlayInput)
+    /// <remarks>
+    /// Looping each PNG for the whole clip made ffmpeg process every graphic on every frame: a 13-kill compilation
+    /// pushed ~77k full 1080p RGBA frames through fades for graphics that are each visible for 1-3 s.
+    /// </remarks>
+    public static string BuildOverlayGraph(Overlays.OverlayRender overlays, int fps, int width, int height, int firstOverlayInput,
+        string input = "0:v")
     {
-        var chains = new List<string> { $"[0:v]fps={fps},setpts=PTS-STARTPTS[v0]" };
+        var chains = new List<string> { $"[{input}]fps={fps},setpts=PTS-STARTPTS[v0]" };
         var last = "v0";
         var scale = width != 1920 || height != 1080 ? $",scale={width}:{height}" : "";
 
@@ -67,9 +73,11 @@ public static class ClipComposer
             var cue = overlays.Layers[i].Cue;
             var s = F(cue.Start);
             var e = F(cue.End);
+            var length = OverlayInputSeconds(cue);
             var fadeIn = cue.Animation == Overlays.OverlayAnimation.Fade ? 0.25 : 0.12;
-            chains.Add($"[{firstOverlayInput + i}:v]format=rgba{scale},fade=in:st={s}:d={F(fadeIn)}:alpha=1," +
-                       $"fade=out:st={F(Math.Max(cue.Start, cue.End - 0.3))}:d=0.3:alpha=1[o{i}]");
+            // Fades are relative to the graphic's own short stream, which is then moved to start at the cue.
+            chains.Add($"[{firstOverlayInput + i}:v]format=rgba{scale},fade=in:st=0:d={F(fadeIn)}:alpha=1," +
+                       $"fade=out:st={F(Math.Max(0, length - 0.3))}:d=0.3:alpha=1,setpts=PTS-STARTPTS+{s}/TB[o{i}]");
 
             // Ease-out cubic over 0.28 s from the cue start.
             var p = $"(1-pow(1-min(max((t-{s})/0.28\\,0)\\,1)\\,3))";
@@ -80,21 +88,17 @@ public static class ClipComposer
                 Overlays.OverlayAnimation.SlideFromRight => $"{slide}*(1-{p})",
                 _ => "0",
             };
-            chains.Add($"[{last}][o{i}]overlay=x='{x}':y=0:enable='between(t\\,{s}\\,{e})'[v{i + 1}]");
+            // eof_action=pass: once a graphic's stream ends, frames pass through untouched.
+            chains.Add($"[{last}][o{i}]overlay=x='{x}':y=0:eof_action=pass:enable='between(t\\,{s}\\,{e})'[v{i + 1}]");
             last = $"v{i + 1}";
-        }
-
-        for (var j = 0; j < overlays.Flashes.Count; j++)
-        {
-            var t = overlays.Flashes[j];
-            chains.Add($"[{last}]drawbox=x=0:y=0:w=iw:h=ih:color=white@0.4:t=fill:" +
-                       $"enable='between(t\\,{F(t)}\\,{F(t + Overlays.OverlayTimeline.FlashLength)})'[f{j}]");
-            last = $"f{j}";
         }
 
         chains.Add($"[{last}]null[vout]");
         return string.Join(';', chains);
     }
+
+    /// <summary>How long an overlay graphic's input stream needs to be: just its time on screen.</summary>
+    public static double OverlayInputSeconds(Overlays.OverlayCue cue) => Math.Max(0.1, cue.End - cue.Start);
 
     /// <summary>Fade in over 0.2 s, hold, fade out over 0.4 s.</summary>
     public static string FadeAlpha(double start, double end)

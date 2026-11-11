@@ -26,7 +26,11 @@ export const highlightLabel: Record<HighlightType, string> = {
   QuadKill: 'Quad Kill',
   PentaKill: 'Penta Kill',
   MegaKill: 'Mega Kill',
+  KillCompilation: 'Kill Compilation',
 }
+
+/** Matches the backend's KillCompilation.IdFor. */
+export const compilationId = (steamId: string) => `kills-${steamId}`
 
 /** Hero names come from the backend's cached catalog; falls back to the numeric id when offline. */
 export function useHeroNames() {

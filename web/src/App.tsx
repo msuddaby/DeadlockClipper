@@ -2,6 +2,7 @@ import { Link, NavLink, Route, Routes } from 'react-router'
 import ClipsPage from './pages/ClipsPage'
 import DemoPage from './pages/DemoPage'
 import DemosPage from './pages/DemosPage'
+import MatchesPage from './pages/MatchesPage'
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
           <NavLink to="/" end>
             Demos
           </NavLink>
+          <NavLink to="/matches">Matches</NavLink>
           <NavLink to="/clips">Clips</NavLink>
         </nav>
       </header>
@@ -21,6 +23,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<DemosPage />} />
           <Route path="/demos/:id" element={<DemoPage />} />
+          <Route path="/matches" element={<MatchesPage />} />
           <Route path="/clips" element={<ClipsPage />} />
           <Route path="*" element={<p className="muted">Page not found.</p>} />
         </Routes>
