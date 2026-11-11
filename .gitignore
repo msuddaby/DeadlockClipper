@@ -1,0 +1,9 @@
+bin/
+obj/
+*.user
+.vs/
+.idea/
+node_modules/
+src/DeadlockClipper.Api/data/
+src/DeadlockClipper.Api/wwwroot/*
+!src/DeadlockClipper.Api/wwwroot/.gitkeep

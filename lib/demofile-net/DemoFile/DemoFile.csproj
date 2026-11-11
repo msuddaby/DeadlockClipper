@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>False</GenerateDocumentationFile>
+    <IsPackable>true</IsPackable>
+    <!-- Missing XML comment for publicly visible type or member -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS1591</WarningsNotAsErrors>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.22.1" />
+    <PackageReference Include="protobuf-net" Version="3.2.16" />
+    <PackageReference Include="Snappier" Version="1.3.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.40.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DemoFile.SdkGen" />
+    <InternalsVisibleTo Include="DemoFile.Test" />
+    <InternalsVisibleTo Include="DemoFile.Benchmark" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protobufs/demo.proto" ProtoRoot="Protobufs" />
+    <Protobuf Include="Protobufs/netmessages.proto" ProtoRoot="Protobufs" />
+    <Protobuf Include="Protobufs/networkbasetypes.proto" ProtoRoot="Protobufs" />
+    <Protobuf Include="Protobufs/network_connection.proto" ProtoRoot="Protobufs" />
+    <Protobuf Include="Protobufs/gameevents.proto" ProtoRoot="Protobufs" />
+    <Protobuf Include="Protobufs/usermessages.proto" ProtoRoot="Protobufs" />
+    <Protobuf Include="Protobufs/te.proto" ProtoRoot="Protobufs" />
+  </ItemGroup>
+
+</Project>

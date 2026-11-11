@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Vendored + patched DemoFile.Net; see lib/demofile-net/PATCHES.md -->
+    <ProjectReference Include="..\..\lib\demofile-net\DemoFile.Game.Deadlock\DemoFile.Game.Deadlock.csproj" />
+  </ItemGroup>
+
+</Project>

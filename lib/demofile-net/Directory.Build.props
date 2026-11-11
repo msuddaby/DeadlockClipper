@@ -1,0 +1,8 @@
+<Project>
+  <!-- Vendored DemoFile.Net (MIT, see LICENSE). Replaces upstream's props, which need NerdBank.GitVersioning and a git checkout. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CS1591;CS8981</NoWarn>
+    <Version>0.44.1-deadlockclipper</Version>
+  </PropertyGroup>
+</Project>

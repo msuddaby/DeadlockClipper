@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DeadlockClipper.Api/DeadlockClipper.Api.csproj" />
+    <Project Path="src/DeadlockClipper.Core/DeadlockClipper.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DeadlockClipper.Core.Tests/DeadlockClipper.Core.Tests.csproj" />
+  </Folder>
+</Solution>
