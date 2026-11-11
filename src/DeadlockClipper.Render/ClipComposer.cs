@@ -52,6 +52,50 @@ public static class ClipComposer
         return new ComposePlan(string.Join(',', filters), texts);
     }
 
+    /// <summary>
+    /// Filter graph for the styled overlays. Input 0 is the video; the overlay PNGs are inputs
+    /// <paramref name="firstOverlayInput"/>.. in layer order, each looped for the clip's length. Output label: [vout].
+    /// </summary>
+    public static string BuildOverlayGraph(Overlays.OverlayRender overlays, int fps, int width, int height, int firstOverlayInput)
+    {
+        var chains = new List<string> { $"[0:v]fps={fps},setpts=PTS-STARTPTS[v0]" };
+        var last = "v0";
+        var scale = width != 1920 || height != 1080 ? $",scale={width}:{height}" : "";
+
+        for (var i = 0; i < overlays.Layers.Count; i++)
+        {
+            var cue = overlays.Layers[i].Cue;
+            var s = F(cue.Start);
+            var e = F(cue.End);
+            var fadeIn = cue.Animation == Overlays.OverlayAnimation.Fade ? 0.25 : 0.12;
+            chains.Add($"[{firstOverlayInput + i}:v]format=rgba{scale},fade=in:st={s}:d={F(fadeIn)}:alpha=1," +
+                       $"fade=out:st={F(Math.Max(cue.Start, cue.End - 0.3))}:d=0.3:alpha=1[o{i}]");
+
+            // Ease-out cubic over 0.28 s from the cue start.
+            var p = $"(1-pow(1-min(max((t-{s})/0.28\\,0)\\,1)\\,3))";
+            var slide = (int)Math.Round(260 * width / 1920.0);
+            var x = cue.Animation switch
+            {
+                Overlays.OverlayAnimation.SlideFromLeft => $"-{slide}*(1-{p})",
+                Overlays.OverlayAnimation.SlideFromRight => $"{slide}*(1-{p})",
+                _ => "0",
+            };
+            chains.Add($"[{last}][o{i}]overlay=x='{x}':y=0:enable='between(t\\,{s}\\,{e})'[v{i + 1}]");
+            last = $"v{i + 1}";
+        }
+
+        for (var j = 0; j < overlays.Flashes.Count; j++)
+        {
+            var t = overlays.Flashes[j];
+            chains.Add($"[{last}]drawbox=x=0:y=0:w=iw:h=ih:color=white@0.4:t=fill:" +
+                       $"enable='between(t\\,{F(t)}\\,{F(t + Overlays.OverlayTimeline.FlashLength)})'[f{j}]");
+            last = $"f{j}";
+        }
+
+        chains.Add($"[{last}]null[vout]");
+        return string.Join(';', chains);
+    }
+
     /// <summary>Fade in over 0.2 s, hold, fade out over 0.4 s.</summary>
     public static string FadeAlpha(double start, double end)
     {

@@ -28,10 +28,17 @@ public sealed class RenderOptions
 
     /// <summary>Null sink the game's audio is moved to so nothing reaches the speakers.</summary>
     public string SilentSink { get; set; } = "deadlock_clipper_silent";
+
+    /// <summary>Headless browser used to render the styled overlay graphics. Without it, plain text captions are used.</summary>
+    public string ChromiumPath { get; set; } = "chromium";
+    /// <summary>"styled" (hero art, animated kill markers) or "plain" (text only).</summary>
+    public string CaptionStyle { get; set; } = "styled";
+    /// <summary>Where extracted hero art is cached.</summary>
+    public string AssetCacheDir { get; set; } = "";
 }
 
-/// <summary>A caption shown over the clip at a time relative to the clip start.</summary>
-public sealed record KillMark(double OffsetSeconds, string Label, bool IsFinal);
+/// <summary>A kill within the clip, at a time relative to the clip start (the death event tick).</summary>
+public sealed record KillMark(double OffsetSeconds, string Label, bool IsFinal, string VictimName = "", int VictimHeroId = 0);
 
 /// <summary>Everything needed to render one highlight. Plain data so it can be sent to a remote worker later.</summary>
 public sealed record RenderJob(
@@ -46,7 +53,11 @@ public sealed record RenderJob(
     string IntroTitle,
     string IntroSubtitle,
     IReadOnlyList<KillMark> KillMarks,
-    string OutputPath)
+    string OutputPath,
+    string PlayerName = "",
+    int PlayerHeroId = 0,
+    // "DOUBLE KILL", "TRIPLE KILL", …
+    string HighlightLabel = "")
 {
     public double DurationSeconds => (EndTick - StartTick) / TickRate;
 }

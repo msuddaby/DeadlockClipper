@@ -47,12 +47,18 @@ builder.Services.AddSingleton(sp =>
         render.OutputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Videos", "Deadlock Clips");
     if (string.IsNullOrWhiteSpace(render.WorkDir))
         render.WorkDir = Path.Combine(storage.DataDir, "render-work");
+    if (string.IsNullOrWhiteSpace(render.AssetCacheDir))
+        render.AssetCacheDir = Path.Combine(storage.DataDir, "hero-art");
     return render;
 });
 builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
 builder.Services.AddSingleton<IGameSession, GameSession>();
 builder.Services.AddSingleton<IRecorder, Recorder>();
-builder.Services.AddSingleton<IClipFinisher, ClipFinisher>();
+builder.Services.AddSingleton<DeadlockClipper.Render.Overlays.IOverlayArtist, DeadlockClipper.Render.Overlays.OverlayArtist>();
+builder.Services.AddSingleton<IClipFinisher>(sp => new ClipFinisher(
+    sp.GetRequiredService<RenderOptions>(),
+    sp.GetRequiredService<IProcessRunner>(),
+    sp.GetRequiredService<DeadlockClipper.Render.Overlays.IOverlayArtist>()));
 builder.Services.AddSingleton<DemoStager>();
 builder.Services.AddSingleton(sp => new Renderer(
     sp.GetRequiredService<RenderOptions>(),

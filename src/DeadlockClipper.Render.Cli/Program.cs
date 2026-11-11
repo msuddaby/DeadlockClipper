@@ -36,21 +36,25 @@ var options = new RenderOptions
     GameDir = gameDir,
     OutputDir = outDir,
     WorkDir = Path.Combine(Path.GetTempPath(), "deadlock-clipper-work"),
+    AssetCacheDir = Path.Combine(Path.GetTempPath(), "deadlock-clipper-hero-art"),
 };
 var demoKey = Path.GetFileNameWithoutExtension(demoPath);
+using var heroAssets = new DeadlockClipper.GameData.HeroAssets(gameDir, options.AssetCacheDir);
 var jobs = highlights.Select(h => CaptionPlan.CreateJob(
     jobId: Guid.NewGuid().ToString("N")[..8],
     demoKey: demoKey,
     demoPath: demoPath,
     analysis: analysis,
     highlight: h,
-    outputPath: Path.Combine(outDir, $"{analysis.MatchId ?? 0}_{h.PlayerName.Split(' ')[0]}_{h.Type}_{h.StartTick}.mp4")))
+    outputPath: Path.Combine(outDir, $"{analysis.MatchId ?? 0}_{h.PlayerName.Split(' ')[0]}_{h.Type}_{h.StartTick}.mp4"),
+    heroName: id => heroAssets.Hero(id)?.Name ?? $"Hero #{id}"))
     .ToList();
 
 var runner = new ProcessRunner();
 var game = new GameSession(options, runner, loggerFactory.CreateLogger<GameSession>());
 var stager = new DemoStager(options);
-var renderer = new Renderer(options, game, new Recorder(options, runner), new ClipFinisher(options, runner),
+using var artist = new DeadlockClipper.Render.Overlays.OverlayArtist(options, runner, loggerFactory.CreateLogger<DeadlockClipper.Render.Overlays.OverlayArtist>());
+var renderer = new Renderer(options, game, new Recorder(options, runner), new ClipFinisher(options, runner, artist),
     stager.StageAsync, loggerFactory.CreateLogger<Renderer>());
 
 var progress = new Progress<RenderProgress>(p => log.LogInformation("[{Job}] {Stage} {Detail}", p.JobId, p.Stage, p.Detail));
@@ -63,6 +67,11 @@ try
     foreach (var r in results)
         Console.WriteLine(r.Success ? $"OK    {r.OutputPath}" : $"FAIL  {r.JobId}: {r.Error}");
     return results.All(r => r.Success) ? 0 : 2;
+}
+catch (GameInUseException ex)
+{
+    log.LogError("{Message}", ex.Message);
+    return 3;
 }
 finally
 {

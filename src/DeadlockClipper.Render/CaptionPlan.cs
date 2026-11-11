@@ -25,7 +25,9 @@ public static class CaptionPlan
             .Select((k, i) => new KillMark(
                 OffsetSeconds: Math.Round((k.Tick - highlight.ClipStartTick) / analysis.TickRate, 2),
                 Label: i == highlight.Kills.Count - 1 ? label : "KILL",
-                IsFinal: i == highlight.Kills.Count - 1))
+                IsFinal: i == highlight.Kills.Count - 1,
+                VictimName: k.VictimName,
+                VictimHeroId: k.VictimHeroId))
             .ToList();
 
         var hero = heroName?.Invoke(highlight.HeroId);
@@ -49,7 +51,10 @@ public static class CaptionPlan
             IntroTitle: player.Name.ToUpperInvariant(),
             IntroSubtitle: subtitle,
             KillMarks: marks,
-            OutputPath: outputPath);
+            OutputPath: outputPath,
+            PlayerName: player.Name,
+            PlayerHeroId: highlight.HeroId,
+            HighlightLabel: label);
     }
 
     public static string Label(HighlightType type) => type switch

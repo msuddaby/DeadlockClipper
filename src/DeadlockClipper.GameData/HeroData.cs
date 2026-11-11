@@ -9,7 +9,16 @@ namespace DeadlockClipper.GameData;
 /// <param name="Id">Numeric hero id as networked in demos (PlayerDataGlobal.HeroID).</param>
 /// <param name="Key">Internal name, e.g. "hero_drifter".</param>
 /// <param name="Name">Localized display name, e.g. "Drifter".</param>
-public sealed record HeroDefinition(int Id, string Key, string Name, bool Playable);
+/// <param name="Images">Panorama image paths by role (card, gloat, logo, small), as declared in heroes.vdata.</param>
+public sealed record HeroDefinition(int Id, string Key, string Name, bool Playable, IReadOnlyDictionary<HeroImage, string>? Images = null);
+
+public enum HeroImage
+{
+    Card,
+    CardGloat,
+    Logo,
+    Small,
+}
 
 /// <summary>
 /// Reads hero definitions straight from the local Deadlock install, so names work offline and follow game patches:
@@ -40,9 +49,46 @@ public static partial class HeroData
             if (heroId <= 0) continue; // hero_base
 
             var playable = !Flag(hero, "m_bDisabled") && !Flag(hero, "m_bInDevelopment");
-            heroes.Add(new HeroDefinition(heroId, key, names.GetValueOrDefault(key) ?? FallbackName(key), playable));
+            heroes.Add(new HeroDefinition(heroId, key, names.GetValueOrDefault(key) ?? FallbackName(key), playable, Images(hero)));
         }
         return heroes;
+    }
+
+    private static readonly (HeroImage Role, string Field)[] ImageFields =
+    [
+        (HeroImage.Card, "m_strIconHeroCard"),
+        (HeroImage.CardGloat, "m_strIconHeroCardGloat"),
+        (HeroImage.Logo, "m_strLogoImageEnglish"),
+        (HeroImage.Small, "m_strIconImageSmall"),
+    ];
+
+    private static Dictionary<HeroImage, string> Images(KVObject hero)
+    {
+        var images = new Dictionary<HeroImage, string>();
+        foreach (var (role, field) in ImageFields)
+        {
+            if (!hero.TryGetValue(field, out var v)) continue;
+            var value = v.ToString();
+            if (!string.IsNullOrWhiteSpace(value)) images[role] = value;
+        }
+        return images;
+    }
+
+    /// <summary>
+    /// Maps a panorama image reference from vdata ("file://{images}/heroes/drifter_card.psd") to its compiled VPK
+    /// entry ("panorama/images/heroes/drifter_card_psd.vtex_c"; .svg becomes .vsvg_c).
+    /// </summary>
+    public static string VpkPath(string panoramaPath)
+    {
+        var path = panoramaPath.Replace("file://{images}/", "panorama/images/", StringComparison.Ordinal);
+        var ext = Path.GetExtension(path);
+        var stem = path[..^ext.Length];
+        return ext.ToLowerInvariant() switch
+        {
+            ".svg" => stem + ".vsvg_c",
+            "" => path,
+            _ => $"{stem}_{ext[1..].ToLowerInvariant()}.vtex_c",
+        };
     }
 
     /// <summary>Collects "hero_x:n" "Display Name" tokens from every *_english.txt localization file.</summary>

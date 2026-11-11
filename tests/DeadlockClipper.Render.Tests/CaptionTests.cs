@@ -33,8 +33,11 @@ public class CaptionTests
         Assert.Equal(99400, job.EndTick);
         Assert.Equal(15.14, job.DurationSeconds, 2);
         Assert.Equal(
-            [new KillMark(5.0, "KILL", false), new KillMark(13.14, "DOUBLE KILL", true)],
+            [new KillMark(5.0, "KILL", false, "Soyah ツ", 2), new KillMark(13.14, "DOUBLE KILL", true, "FunniHeCool", 2)],
             job.KillMarks);
+        Assert.Equal(64, job.PlayerHeroId);
+        Assert.Equal("Counter Strike Genius (150 iq)", job.PlayerName);
+        Assert.Equal("DOUBLE KILL", job.HighlightLabel);
         Assert.Equal("COUNTER STRIKE GENIUS (150 IQ)", job.IntroTitle);
         Assert.Equal("Holliday  ·  Double Kill  ·  25:43  ·  Match 135555232", job.IntroSubtitle);
     }

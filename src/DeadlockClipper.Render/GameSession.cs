@@ -66,19 +66,33 @@ public sealed class GameSession(RenderOptions options, IProcessRunner runner, IL
         await File.WriteAllTextAsync(Path.Combine(cfgDir, CommandCfg + ".cfg"), "", ct);
 
         Directory.CreateDirectory(RuntimeDir);
-        await File.WriteAllTextAsync(Path.Combine(RuntimeDir, "render-request"),
-            $"WIDTH={options.Width}\nHEIGHT={options.Height}\nFPS={options.Fps}\n", ct);
+        var request = Path.Combine(RuntimeDir, "render-request");
+        await File.WriteAllTextAsync(request, $"WIDTH={options.Width}\nHEIGHT={options.Height}\nFPS={options.Fps}\n", ct);
 
-        log.LogInformation("Launching Deadlock in render mode");
-        await runner.RunAsync("steam", [$"steam://rungameid/{options.SteamAppId}"], timeout: TimeSpan.FromSeconds(10), ct: ct);
-
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(options.LaunchTimeoutSeconds);
-        while (_window == null)
+        try
         {
-            if (DateTime.UtcNow > deadline) throw new TimeoutException("Deadlock did not start in render mode.");
-            await Task.Delay(1000, ct);
-            _display ??= await FindGamescopeDisplayAsync(ct);
-            if (_display != null) _window = await FindWindowAsync(ct);
+            log.LogInformation("Launching Deadlock in render mode");
+            var steamLogMark = SteamConsoleLogLength();
+            await runner.RunAsync("steam", [$"steam://rungameid/{options.SteamAppId}"], timeout: TimeSpan.FromSeconds(10), ct: ct);
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(options.LaunchTimeoutSeconds);
+            while (_window == null)
+            {
+                if (DateTime.UtcNow > deadline)
+                    throw new TimeoutException(SteamWaitingFor(steamLogMark) is { } prompt
+                        ? $"Steam is waiting for you to answer a dialog ({prompt}) before Deadlock can start. Answer it in Steam, then retry."
+                        : "Deadlock did not start in render mode.");
+                await Task.Delay(1000, ct);
+                _display ??= await FindGamescopeDisplayAsync(ct);
+                if (_display != null) _window = await FindWindowAsync(ct);
+            }
+        }
+        catch
+        {
+            // The wrapper consumes the request on the next launch. If this launch never happened, a leftover request
+            // would make the player's own next Play start invisibly in render mode.
+            File.Delete(request);
+            throw;
         }
         log.LogInformation("Game window {Window} on gamescope display {Display}", _window, _display);
 
@@ -154,6 +168,51 @@ public sealed class GameSession(RenderOptions options, IProcessRunner runner, IL
         }
         if (await IsAliveAsync(ct) && await FindGamescopeDisplayAsync(ct) != null) await KillGameAsync(ct);
         Reset();
+    }
+
+    private static string SteamConsoleLog =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local/share/Steam/logs/console_log.txt");
+
+    private static long SteamConsoleLogLength() => File.Exists(SteamConsoleLog) ? new FileInfo(SteamConsoleLog).Length : 0;
+
+    /// <summary>
+    /// Steam pauses a launch on dialogs (shader pre-caching, cloud conflicts, EULAs) and logs
+    /// "LaunchApp waiting for user response to &lt;Task&gt;". Returns the task name if this launch is stuck on one.
+    /// </summary>
+    private string? SteamWaitingFor(long fromOffset)
+    {
+        try
+        {
+            using var fs = new FileStream(SteamConsoleLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length < fromOffset) fromOffset = 0;
+            fs.Seek(fromOffset, SeekOrigin.Begin);
+            return ParseSteamWaitingFor(new StreamReader(fs).ReadToEnd(), options.SteamAppId);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    internal static string? ParseSteamWaitingFor(string steamLog, int appId)
+    {
+        string? waiting = null;
+        var marker = $"GameAction [AppID {appId},";
+        foreach (var line in steamLog.Split('\n'))
+        {
+            if (!line.Contains(marker, StringComparison.Ordinal)) continue;
+            var i = line.IndexOf("waiting for user response to ", StringComparison.Ordinal);
+            if (i >= 0)
+            {
+                // ShowInterstitials is logged alongside the real prompt; prefer the specific one.
+                var task = line[(i + 29)..].Split(' ', 2)[0];
+                if (task != "ShowInterstitials" || waiting == null) waiting = task;
+            }
+            else if (line.Contains("changed task to", StringComparison.Ordinal) && waiting != null
+                     && !line.Contains("ShowInterstitials", StringComparison.Ordinal))
+                waiting = null; // the launch moved on after the prompt
+        }
+        return waiting;
     }
 
     private void Reset()

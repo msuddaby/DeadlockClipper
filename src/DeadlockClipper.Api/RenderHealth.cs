@@ -2,7 +2,8 @@ using DeadlockClipper.Render;
 
 namespace DeadlockClipper.Api;
 
-public sealed record HealthCheck(string Id, string Label, bool Ok, string? Fix);
+/// <param name="Required">Optional checks only affect extras (e.g. styled captions) and don't block rendering.</param>
+public sealed record HealthCheck(string Id, string Label, bool Ok, string? Fix, bool Required = true);
 
 public sealed record RenderHealthReport(bool Ok, IReadOnlyList<HealthCheck> Checks);
 
@@ -47,7 +48,10 @@ public sealed class RenderHealth(RenderOptions options, IProcessRunner runner)
             File.Exists(Path.Combine(Home, ".config/wireplumber/wireplumber.conf.d/51-deadlock-clipper.conf")),
             "Copy tools/wireplumber/51-deadlock-clipper.conf to ~/.config/wireplumber/wireplumber.conf.d/ and run: systemctl --user restart wireplumber"));
 
-        _cached = new RenderHealthReport(checks.All(c => c.Ok), checks);
+        checks.Add(new HealthCheck("chromium", "Chromium installed (styled captions with hero art)", OnPath(options.ChromiumPath),
+            "Install it for styled captions: sudo pacman -S chromium. Without it, clips get plain text captions.", Required: false));
+
+        _cached = new RenderHealthReport(checks.Where(c => c.Required).All(c => c.Ok), checks);
         _cachedAt = DateTime.UtcNow;
         return _cached;
     }
