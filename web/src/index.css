@@ -368,3 +368,123 @@ progress.wide {
     padding-left: 8px;
   }
 }
+
+/* --- navigation --- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+.nav {
+  display: flex;
+  gap: 18px;
+  font-size: 14px;
+}
+.nav a {
+  color: var(--muted);
+}
+.nav a.active {
+  color: var(--text);
+  text-decoration: none;
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 2px;
+}
+
+/* --- setup banner --- */
+.banner {
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--border));
+}
+.banner ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* --- highlight render controls --- */
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.highlight-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.highlight-row .highlight-main {
+  flex: 1;
+  min-width: 0;
+  grid-template-columns: 110px 1fr auto auto 16px;
+}
+.highlight-actions {
+  flex-shrink: 0;
+  min-width: 110px;
+  display: flex;
+  justify-content: flex-end;
+}
+.render-error {
+  margin: 0 0 8px 126px;
+}
+.clip-player {
+  margin: 4px 0 12px 126px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.clip-player video,
+.clip-card video {
+  width: 100%;
+  max-width: 720px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+}
+
+/* --- clips page --- */
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+}
+.clip-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.clip-card video {
+  border-radius: 0;
+  max-width: none;
+  display: block;
+}
+.clip-meta {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clip-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .highlight-row {
+    flex-wrap: wrap;
+  }
+  .highlight-actions {
+    min-width: 0;
+    padding: 0 4px 10px;
+  }
+  .render-error,
+  .clip-player {
+    margin-left: 4px;
+  }
+  .topbar {
+    gap: 16px;
+  }
+}

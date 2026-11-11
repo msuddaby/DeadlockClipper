@@ -2,8 +2,12 @@
   <Folder Name="/src/">
     <Project Path="src/DeadlockClipper.Api/DeadlockClipper.Api.csproj" />
     <Project Path="src/DeadlockClipper.Core/DeadlockClipper.Core.csproj" />
+    <Project Path="src/DeadlockClipper.GameData/DeadlockClipper.GameData.csproj" />
+    <Project Path="src/DeadlockClipper.Render.Cli/DeadlockClipper.Render.Cli.csproj" />
+    <Project Path="src/DeadlockClipper.Render/DeadlockClipper.Render.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DeadlockClipper.Core.Tests/DeadlockClipper.Core.Tests.csproj" />
+    <Project Path="tests/DeadlockClipper.Render.Tests/DeadlockClipper.Render.Tests.csproj" />
   </Folder>
 </Solution>

@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DeadlockClipper.Core\DeadlockClipper.Core.csproj" />
+    <ProjectReference Include="..\DeadlockClipper.Render\DeadlockClipper.Render.csproj" />
+    <ProjectReference Include="..\DeadlockClipper.GameData\DeadlockClipper.GameData.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -10,6 +12,9 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Linux-only app (rendering needs gamescope/PipeWire); also stops ValveResourceFormat copying native libs for every platform. -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

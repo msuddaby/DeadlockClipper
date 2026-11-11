@@ -17,7 +17,14 @@ public sealed record PlayerInfo(
     int Kills,
     int Deaths,
     int Assists,
-    int NetWorth);
+    int NetWorth,
+    // Lane the player started in (Deadlock numbers them 1, 4, 6).
+    int Lane = 0,
+    // Controller entity index, used to break ties within a lane.
+    int EntityIndex = 0,
+    // Position in the in-game top bar, left to right: Amber 1-6, Sapphire 7-12. 0 if unknown.
+    // This is what `citadel_spectate_topbar_player` takes.
+    int TopBarSlot = 0);
 
 public sealed record KillEvent(
     int Tick,
@@ -41,6 +48,8 @@ public enum HighlightType
 }
 
 public sealed record Highlight(
+    // Stable within a demo: "{playerSteamId}-{startTick}".
+    string Id,
     HighlightType Type,
     ulong PlayerSteamId,
     string PlayerName,

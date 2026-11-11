@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react'
 import { api, type HighlightType } from './api'
 
 export function formatClock(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds))
+  const s = Math.max(0, Math.round(seconds))
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
   const sec = String(s % 60).padStart(2, '0')

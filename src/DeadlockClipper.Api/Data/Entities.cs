@@ -39,4 +39,36 @@ public sealed class Demo
 
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ParsedAt { get; set; }
+
+    /// <summary>Analyzer version that produced AnalysisJson; older analyses are re-parsed on startup.</summary>
+    public int AnalysisVersion { get; set; }
+}
+
+public enum RenderStatus
+{
+    Queued,
+    Rendering,
+    Done,
+    Failed,
+}
+
+/// <summary>A request to render one highlight to a video file.</summary>
+public sealed class ClipRender
+{
+    public Guid Id { get; set; }
+    public Guid DemoId { get; set; }
+    public required string HighlightId { get; set; }
+    public RenderStatus Status { get; set; }
+    public string? Error { get; set; }
+    public string? OutputPath { get; set; }
+
+    // Denormalized from the highlight so the clips list doesn't need to load analyses.
+    public required string PlayerName { get; set; }
+    public required string HighlightType { get; set; }
+    public int HeroId { get; set; }
+    public double GameTimeSeconds { get; set; }
+    public long? MatchId { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
 }

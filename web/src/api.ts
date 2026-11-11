@@ -30,6 +30,9 @@ export interface PlayerInfo {
   deaths: number
   assists: number
   netWorth: number
+  lane: number
+  entityIndex: number
+  topBarSlot: number
 }
 
 export interface KillEvent {
@@ -46,6 +49,7 @@ export interface KillEvent {
 }
 
 export interface Highlight {
+  id: string
   type: HighlightType
   playerSteamId: string
   playerName: string
@@ -96,6 +100,51 @@ export interface HeroInfo {
   iconUrl: string | null
 }
 
+export type RenderStatus = 'Queued' | 'Rendering' | 'Done' | 'Failed'
+export type RenderStage =
+  | 'Queued'
+  | 'Launching'
+  | 'LoadingDemo'
+  | 'Seeking'
+  | 'Recording'
+  | 'Encoding'
+  | 'Done'
+  | 'Failed'
+
+export interface RenderInfo {
+  id: string
+  demoId: string
+  highlightId: string
+  status: RenderStatus
+  stage: RenderStage | null
+  detail: string | null
+  error: string | null
+  playerName: string
+  highlightType: HighlightType
+  heroId: number
+  gameTimeSeconds: number
+  matchId: number | null
+  createdAt: string
+  finishedAt: string | null
+  hasVideo: boolean
+}
+
+export interface HealthCheck {
+  id: string
+  label: string
+  ok: boolean
+  fix: string | null
+}
+
+export interface RenderHealth {
+  ok: boolean
+  checks: HealthCheck[]
+}
+
+export const videoUrl = (renderId: string) => `/api/renders/${renderId}/video`
+/** Same video, but the browser shows the frame at 1s as the poster instead of the (often dark) first frame. */
+export const previewUrl = (renderId: string) => `${videoUrl(renderId)}#t=1`
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
   if (!res.ok) throw new Error(await errorMessage(res))
@@ -124,6 +173,19 @@ export const api = {
       body: JSON.stringify({ fileName }),
     }),
   heroes: () => request<HeroInfo[]>('/api/heroes'),
+  renders: (demoId?: string) => request<RenderInfo[]>(demoId ? `/api/renders?demoId=${demoId}` : '/api/renders'),
+  renderHighlight: (demoId: string, highlightId: string) =>
+    request<RenderInfo>(`/api/demos/${demoId}/highlights/${encodeURIComponent(highlightId)}/render`, {
+      method: 'POST',
+    }),
+  renderPlayer: (demoId: string, steamId: string) =>
+    request<RenderInfo[]>(`/api/demos/${demoId}/render-player`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ steamId }),
+    }),
+  deleteRender: (id: string) => request<void>(`/api/renders/${id}`, { method: 'DELETE' }),
+  renderHealth: () => request<RenderHealth>('/api/render/health'),
 }
 
 /** fetch() can't report upload progress, so uploads use XHR. */

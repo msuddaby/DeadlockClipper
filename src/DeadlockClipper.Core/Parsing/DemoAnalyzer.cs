@@ -7,6 +7,9 @@ namespace DeadlockClipper.Core.Parsing;
 /// <summary>Parses a Deadlock .dem in a single pass and runs highlight detectors over the result.</summary>
 public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = null)
 {
+    /// <summary>Bump when MatchAnalysis gains data that stored analyses need (v2: top-bar slots, highlight ids).</summary>
+    public const int Version = 2;
+
     private const double DefaultTickRate = 64;
     private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector()];
 
@@ -65,8 +68,7 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
         if (demo.GameRules is { } rules && rules.MatchID.Value != 0) matchId = (long)rules.MatchID.Value;
 
         var totalTicks = demo.CurrentDemoTick.Value;
-        var playerList = players.Values
-            .Where(p => p.Team is Team.Amber or Team.Sapphire)
+        var playerList = AssignTopBarSlots(players.Values.Where(p => p.Team is Team.Amber or Team.Sapphire))
             .OrderBy(p => p.Team).ThenByDescending(p => p.NetWorth)
             .ToList();
 
@@ -104,7 +106,25 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
                 Kills: Math.Max(data.PlayerKills, previous?.Kills ?? 0),
                 Deaths: Math.Max(data.Deaths, previous?.Deaths ?? 0),
                 Assists: Math.Max(data.PlayerAssists, previous?.Assists ?? 0),
-                NetWorth: Math.Max(data.GoldNetWorth, previous?.NetWorth ?? 0));
+                NetWorth: Math.Max(data.GoldNetWorth, previous?.NetWorth ?? 0),
+                Lane: c.OriginalLaneAssignment != 0 ? c.OriginalLaneAssignment : previous?.Lane ?? 0,
+                EntityIndex: (int)c.EntityIndex.Value);
+        }
+    }
+
+    /// <summary>
+    /// The in-game top bar lists each team by starting lane (1, 4, 6), then by controller entity index:
+    /// Amber fills slots 1-6, Sapphire 7-12. Verified against a live replay for all 12 players.
+    /// Uses the original lane; if lane swaps reorder the bar mid-match this may need AssignedLane instead.
+    /// </summary>
+    public static IEnumerable<PlayerInfo> AssignTopBarSlots(IEnumerable<PlayerInfo> players)
+    {
+        foreach (var team in players.GroupBy(p => p.Team))
+        {
+            var offset = team.Key switch { Team.Amber => 0, Team.Sapphire => 6, _ => -1 };
+            var ordered = team.OrderBy(p => p.Lane).ThenBy(p => p.EntityIndex).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+                yield return ordered[i] with { TopBarSlot = offset >= 0 && i < 6 ? offset + i + 1 : 0 };
         }
     }
 

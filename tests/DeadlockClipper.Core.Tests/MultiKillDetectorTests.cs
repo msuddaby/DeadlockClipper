@@ -44,6 +44,7 @@ public class MultiKillDetectorTests
         Assert.Equal("Alice", h.PlayerName);
         Assert.Equal(13, h.HeroId);
         Assert.Equal(2, h.Kills.Count);
+        Assert.Equal($"{Alice}-{(int)(100 * TickRate)}", h.Id);
     }
 
     [Fact]

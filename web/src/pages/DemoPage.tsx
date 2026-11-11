@@ -1,8 +1,20 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api, type Highlight, type KillEvent, type MatchAnalysis, type PlayerInfo, type Team } from '../api'
+import {
+  api,
+  previewUrl,
+  videoUrl,
+  type Highlight,
+  type KillEvent,
+  type MatchAnalysis,
+  type PlayerInfo,
+  type RenderInfo,
+  type Team,
+} from '../api'
+import HealthBanner from '../components/HealthBanner'
 import { formatClock, highlightLabel, useHeroNames, useMe } from '../format'
+import { renderStatusText, useRenderHealth, useRenders } from '../renders'
 
 export default function DemoPage() {
   const { id } = useParams<{ id: string }>()
@@ -55,17 +67,34 @@ export default function DemoPage() {
           <p className="error">Parsing failed: {demo.error}</p>
         </div>
       )}
-      {analysis && <Analysis analysis={analysis} />}
+      {analysis && demo.status === 'Done' && <HealthBanner />}
+      {analysis && <Analysis analysis={analysis} demoId={demo.id} />}
     </div>
   )
 }
 
-function Analysis({ analysis }: { analysis: MatchAnalysis }) {
+function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: string }) {
   const heroName = useHeroNames()
   const [me, setMe] = useMe()
   const meInMatch = analysis.players.some((p) => p.steamId === me)
   const [onlyMe, setOnlyMe] = useState(true)
   const filterToMe = onlyMe && meInMatch
+
+  const queryClient = useQueryClient()
+  const renders = useRenders(demoId)
+  const health = useRenderHealth()
+  const canRender = health.data?.ok ?? false
+  const rendersByHighlight = useMemo(
+    () => new Map((renders.data ?? []).map((r) => [r.highlightId, r])),
+    [renders.data],
+  )
+  const refreshRenders = () => queryClient.invalidateQueries({ queryKey: ['renders'] })
+  const renderMine = useMutation({
+    mutationFn: () => api.renderPlayer(demoId, me!),
+    onSuccess: refreshRenders,
+  })
+  const myHighlights = analysis.highlights.filter((h) => h.playerSteamId === me)
+  const myUnrendered = myHighlights.filter((h) => !rendersByHighlight.has(h.id))
 
   const highlights = filterToMe ? analysis.highlights.filter((h) => h.playerSteamId === me) : analysis.highlights
   const teams: Team[] = ['Amber', 'Sapphire']
@@ -89,12 +118,25 @@ function Analysis({ analysis }: { analysis: MatchAnalysis }) {
         <div className="section-head">
           <h2>Highlights</h2>
           {meInMatch && (
-            <label className="toggle">
-              <input type="checkbox" checked={onlyMe} onChange={(e) => setOnlyMe(e.target.checked)} />
-              Only mine
-            </label>
+            <div className="head-actions">
+              <label className="toggle">
+                <input type="checkbox" checked={onlyMe} onChange={(e) => setOnlyMe(e.target.checked)} />
+                Only mine
+              </label>
+              {myHighlights.length > 0 && (
+                <button
+                  className="button"
+                  disabled={!canRender || renderMine.isPending || myUnrendered.length === 0}
+                  title={myUnrendered.length === 0 ? 'All your highlights are rendered or queued' : undefined}
+                  onClick={() => renderMine.mutate()}
+                >
+                  Render all mine{myUnrendered.length > 0 ? ` (${myUnrendered.length})` : ''}
+                </button>
+              )}
+            </div>
           )}
         </div>
+        {renderMine.error && <p className="error small">{(renderMine.error as Error).message}</p>}
         {!meInMatch && (
           <p className="muted small">Tip: click ☆ next to your name in a roster to filter highlights to yourself.</p>
         )}
@@ -103,7 +145,16 @@ function Analysis({ analysis }: { analysis: MatchAnalysis }) {
         ) : (
           <ul className="list">
             {highlights.map((h) => (
-              <HighlightRow key={`${h.playerSteamId}-${h.startTick}`} h={h} heroName={heroName} tickRate={analysis.tickRate} />
+              <HighlightRow
+                key={h.id}
+                h={h}
+                demoId={demoId}
+                render={rendersByHighlight.get(h.id)}
+                canRender={canRender}
+                onChanged={refreshRenders}
+                heroName={heroName}
+                tickRate={analysis.tickRate}
+              />
             ))}
           </ul>
         )}
@@ -169,22 +220,67 @@ function Roster({
   )
 }
 
-function HighlightRow({ h, heroName, tickRate }: { h: Highlight; heroName: (id: number) => string; tickRate: number }) {
+function HighlightRow({
+  h,
+  demoId,
+  render,
+  canRender,
+  onChanged,
+  heroName,
+  tickRate,
+}: {
+  h: Highlight
+  demoId: string
+  render: RenderInfo | undefined
+  canRender: boolean
+  onChanged: () => void
+  heroName: (id: number) => string
+  tickRate: number
+}) {
   const [open, setOpen] = useState(false)
   const clipSeconds = (h.clipEndTick - h.clipStartTick) / tickRate
+  const start = useMutation({ mutationFn: () => api.renderHighlight(demoId, h.id), onSuccess: onChanged })
+  const ready = render?.status === 'Done' && render.hasVideo
   return (
     <li className="highlight">
-      <button className="highlight-main" onClick={() => setOpen((o) => !o)}>
-        <span className={`badge hl-${h.type.toLowerCase()}`}>{highlightLabel[h.type]}</span>
-        <span>
-          <strong>{h.playerName}</strong> <span className="muted">({heroName(h.heroId)})</span>
-        </span>
-        <span className="mono">{formatClock(h.startTimeSeconds)}</span>
-        <span className="muted small mono">
-          ticks {h.clipStartTick}–{h.clipEndTick} · {clipSeconds.toFixed(0)}s clip
-        </span>
-        <span className="muted small">{open ? '▾' : '▸'}</span>
-      </button>
+      <div className="highlight-row">
+        <button className="highlight-main" onClick={() => setOpen((o) => !o)}>
+          <span className={`badge hl-${h.type.toLowerCase()}`}>{highlightLabel[h.type]}</span>
+          <span>
+            <strong>{h.playerName}</strong> <span className="muted">({heroName(h.heroId)})</span>
+          </span>
+          <span className="mono">{formatClock(h.startTimeSeconds)}</span>
+          <span className="muted small mono">{clipSeconds.toFixed(0)}s clip</span>
+          <span className="muted small">{open ? '▾' : '▸'}</span>
+        </button>
+        <div className="highlight-actions">
+          {!render || render.status === 'Failed' ? (
+            <button
+              className="button ghost"
+              disabled={!canRender || start.isPending}
+              title={render?.error ?? undefined}
+              onClick={() => start.mutate()}
+            >
+              {render?.status === 'Failed' ? 'Retry' : 'Render'}
+            </button>
+          ) : ready ? (
+            <button className="button" onClick={() => setOpen(true)}>
+              ▶ Watch
+            </button>
+          ) : (
+            <span className={`badge ${render.status === 'Rendering' ? 'parsing' : 'queued'}`}>{renderStatusText(render)}</span>
+          )}
+        </div>
+      </div>
+      {render?.status === 'Failed' && render.error && <p className="error small render-error">Render failed: {render.error}</p>}
+      {open && ready && (
+        <div className="clip-player">
+          <video src={previewUrl(render.id)} controls preload="metadata" />
+          <a className="small" href={videoUrl(render.id)} download>
+            Download clip
+          </a>
+        </div>
+      )}
       {open && (
         <ul className="kills-inline">
           {h.kills.map((k) => (

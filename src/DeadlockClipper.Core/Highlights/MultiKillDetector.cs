@@ -56,6 +56,7 @@ public sealed class MultiKillDetector(MultiKillOptions? options = null) : IHighl
             players.TryGetValue(steamId, out var player);
 
             highlight = new Highlight(
+                Id: $"{steamId}-{first.Tick}",
                 Type: TypeFor(kills.Count),
                 PlayerSteamId: steamId,
                 PlayerName: player?.Name ?? first.AttackerName ?? "Unknown",

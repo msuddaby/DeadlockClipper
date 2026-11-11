@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Deadlock launch wrapper for Deadlock Clipper.
 #
-# Set Deadlock's Steam launch options to:
-#   /path/to/deadlock-launch-wrapper.sh %command% -console -condebug
+# Set Deadlock's Steam launch options to (add any of your own options after %command%):
+#   /path/to/deadlock-launch-wrapper.sh %command%
 #
 # Normal launches (pressing Play) run the game unchanged, with your own settings.
 # When the clipper wants to render, it writes a one-shot request file first. The next launch then:
@@ -113,9 +113,11 @@ fi
 # Not exec: the wrapper must outlive the game to restore settings afterwards.
 # Steam stops the game with SIGTERM/SIGINT; forward it, then still restore.
 trap 'kill -TERM "$child" 2>/dev/null' TERM INT
+# -condebug: the clipper follows game state through console.log.
+# +exec clipper_boot: binds the key the clipper presses to run commands (cfg written by the clipper).
 gamescope --backend headless \
   -w "$WIDTH" -h "$HEIGHT" -W "$WIDTH" -H "$HEIGHT" -r "$FPS" \
-  -- "$@" &
+  -- "$@" -condebug +exec clipper_boot &
 child=$!
 wait "$child"; status=$?
 # wait returns early when a trapped signal arrives; wait again for the real exit.

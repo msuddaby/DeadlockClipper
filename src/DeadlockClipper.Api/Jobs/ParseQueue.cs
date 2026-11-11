@@ -78,6 +78,7 @@ public sealed class ParseWorker(
             demo.Map = analysis.Map;
             demo.DurationSeconds = analysis.DurationSeconds;
             demo.HighlightCount = analysis.Highlights.Count;
+            demo.AnalysisVersion = DemoAnalyzer.Version;
             demo.Status = DemoStatus.Done;
             demo.ParsedAt = DateTimeOffset.UtcNow;
             log.LogInformation("Parsed {File} in {Elapsed}: {Kills} kills, {Highlights} highlights",
@@ -98,10 +99,13 @@ public sealed class ParseWorker(
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // Unfinished parses, plus demos analysed by an older analyzer (missing data newer features rely on).
         var pending = await db.Demos
-            .Where(d => d.Status == DemoStatus.Queued || d.Status == DemoStatus.Parsing)
+            .Where(d => d.Status == DemoStatus.Queued || d.Status == DemoStatus.Parsing
+                        || (d.Status == DemoStatus.Done && d.AnalysisVersion < DemoAnalyzer.Version))
             .OrderBy(d => d.CreatedAt)
             .ToListAsync(ct);
+        if (pending.Count > 0) log.LogInformation("Queueing {Count} demos for (re)parsing", pending.Count);
         foreach (var d in pending)
         {
             d.Status = DemoStatus.Queued;
