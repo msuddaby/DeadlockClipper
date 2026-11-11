@@ -1,6 +1,9 @@
 namespace DeadlockClipper.Core.Parsing;
 
-/// <summary>Teams as Deadlock networks them (CitadelTeamNum).</summary>
+/// <summary>
+/// Teams as Deadlock networks them (CitadelTeamNum). In game, Amber is the Hidden King's team and Sapphire the
+/// Archmother's; the code keeps the network names.
+/// </summary>
 public enum Team
 {
     Unknown = 0,
@@ -47,10 +50,13 @@ public enum HighlightType
     MegaKill, // 6+
     // All of one player's kills spliced together; see Highlights.KillCompilation.
     KillCompilation,
+    // A burst of kills from both teams with the quiet stretches cut out; see Highlights.DenseFightDetector.
+    TeamFight,
 }
 
 /// <summary>A stretch of demo to record, in ticks.</summary>
-public sealed record ClipSegment(int StartTick, int EndTick);
+/// <param name="FocusSteamId">Player the camera follows during this segment; null: the highlight's player.</param>
+public sealed record ClipSegment(int StartTick, int EndTick, ulong? FocusSteamId = null);
 
 public sealed record Highlight(
     // Stable within a demo: "{playerSteamId}-{startTick}".
@@ -80,4 +86,6 @@ public sealed record MatchAnalysis(
     double DurationSeconds,
     IReadOnlyList<PlayerInfo> Players,
     IReadOnlyList<KillEvent> Kills,
-    IReadOnlyList<Highlight> Highlights);
+    IReadOnlyList<Highlight> Highlights,
+    // From the GameOver message; Unknown for demos that end before the Patron falls (or older analyses).
+    Team WinningTeam = Team.Unknown);

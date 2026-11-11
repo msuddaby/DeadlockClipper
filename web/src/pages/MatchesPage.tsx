@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type ScannedMatch } from '../api'
 import SteamAccounts from '../components/SteamAccounts'
@@ -23,6 +23,11 @@ const isBusy = (m: ScannedMatch) =>
 export default function MatchesPage() {
   const [me, setMe] = useMe()
   const status = useQuery({ queryKey: ['steam-status'], queryFn: api.steamStatus, refetchInterval: 5_000 })
+  // "Me" lives in this browser only (and the roster ☆ can toggle it off); the server knows whose history it scanned.
+  const scanned = useQuery({ queryKey: ['scanned-players'], queryFn: api.scannedPlayers, enabled: !me })
+  useEffect(() => {
+    if (!me && scanned.data?.length === 1) setMe(scanned.data[0])
+  }, [me, scanned.data, setMe])
 
   return (
     <div className="stack">
@@ -30,7 +35,17 @@ export default function MatchesPage() {
 
       <section className="card">
         <h2>Your account</h2>
-        <SteamIdForm me={me} onSet={setMe} />
+        <SteamIdForm key={me ?? ''} me={me} onSet={setMe} />
+        {!me && (scanned.data?.length ?? 0) > 1 && (
+          <p className="small">
+            Scanned before:{' '}
+            {scanned.data!.map((id) => (
+              <button key={id} className="button ghost mono" onClick={() => setMe(id)}>
+                {id}
+              </button>
+            ))}
+          </p>
+        )}
       </section>
 
       {me && (

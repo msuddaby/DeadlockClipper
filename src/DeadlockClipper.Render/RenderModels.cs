@@ -46,7 +46,12 @@ public sealed class RenderOptions
 }
 
 /// <summary>A kill within the clip, at a time relative to the finished clip's start (the death event tick).</summary>
-public sealed record KillMark(double OffsetSeconds, string Label, bool IsFinal, string VictimName = "", int VictimHeroId = 0);
+/// <param name="ShowMarker">
+/// False for kills that only time the captions (a teamfight's kills come from both teams, so numbering them would
+/// mislead; the game's own kill feed shows them).
+/// </param>
+public sealed record KillMark(double OffsetSeconds, string Label, bool IsFinal, string VictimName = "", int VictimHeroId = 0,
+    bool ShowMarker = true);
 
 /// <summary>Everything needed to render one highlight. Plain data so it can be sent to a remote worker later.</summary>
 public sealed record RenderJob(
@@ -67,8 +72,12 @@ public sealed record RenderJob(
     // "DOUBLE KILL", "TRIPLE KILL", …
     string HighlightLabel = "",
     // Pieces of the demo recorded one after another and joined (a kill compilation). Null: just StartTick..EndTick.
-    IReadOnlyList<ClipSegment>? Segments = null)
+    IReadOnlyList<ClipSegment>? Segments = null,
+    // Camera per segment (top-bar slot), when it isn't TopBarSlot throughout (teamfights follow the action).
+    IReadOnlyList<int>? SegmentTopBarSlots = null)
 {
+    public int SlotFor(int segment) => SegmentTopBarSlots is { } s && segment < s.Count && s[segment] is >= 1 and <= 12 ? s[segment] : TopBarSlot;
+
     public IReadOnlyList<ClipSegment> ClipSegments => Segments is { Count: > 0 } s ? s : [new ClipSegment(StartTick, EndTick)];
 
     public double SegmentSeconds(ClipSegment s) => (s.EndTick - s.StartTick) / TickRate;

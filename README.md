@@ -81,7 +81,7 @@ The same CLI has `history`, `salts`, `meta` and `download` commands for debuggin
 | `Clipper:HeroesUrl` | assets.deadlock-api.com | Hero id → name, cached to `data/heroes.json` |
 | `Clipper:Steam:AccountsDir` | `~/.config/deadlock-clipper/steam-accounts` | Saved logins for the clipper Steam accounts |
 | `Clipper:Steam:MetadataIntervalSeconds` | 110 | Minimum gap between metadata requests per account |
-| `Clipper:Steam:IdleDisconnectSeconds` | 120 | Log an account off Steam after this long without requests |
+| `Clipper:Steam:IdleDisconnectSeconds` | 600 | Log an account off Steam after this long without requests |
 | `Clipper:Render:GameDir` | parent of `ReplaysDir` | Deadlock's `game/citadel` folder |
 | `Clipper:Render:OutputDir` | `~/Videos/Deadlock Clips` | Finished clips |
 | `Clipper:Render:Width` / `Height` / `Fps` | 1920 / 1080 / 60 | Render resolution |

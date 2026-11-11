@@ -25,7 +25,10 @@ public sealed record DemoSummaryDto(
     double? DurationSeconds,
     int? HighlightCount,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? ParsedAt);
+    DateTimeOffset? ParsedAt,
+    DemoOverviewDto? Overview = null,
+    // When the match was played, if known (scanned match history, or a local replay's file time minus its length).
+    DateTimeOffset? PlayedAt = null);
 
 public sealed record DemoDetailDto(DemoSummaryDto Demo, MatchAnalysis? Analysis);
 
@@ -39,10 +42,14 @@ public static class Endpoints
     {
         var api = app.MapGroup("/api");
 
-        api.MapGet("/demos", async (AppDbContext db, ParseQueue queue) =>
+        api.MapGet("/demos", async (AppDbContext db, ParseQueue queue, JsonSerializerOptions json) =>
         {
             var demos = await db.Demos.OrderByDescending(d => d.CreatedAt).ToListAsync();
-            return demos.Select(d => ToSummary(d, queue));
+            var ids = demos.Where(d => d.MatchId != null).Select(d => d.MatchId!.Value).ToList();
+            var started = await db.Matches.Where(m => ids.Contains(m.MatchId)).ToDictionaryAsync(m => m.MatchId, m => m.StartTime);
+            return demos
+                .Select(d => ToSummary(d, queue) with { Overview = DemoOverview.For(d, json), PlayedAt = PlayedAt(d, started) })
+                .OrderByDescending(d => d.PlayedAt ?? d.CreatedAt);
         });
 
         api.MapGet("/demos/{id:guid}", async (Guid id, AppDbContext db, ParseQueue queue, JsonSerializerOptions json) =>
@@ -191,6 +198,15 @@ public static class Endpoints
         }
 
         return Results.Problem("No file in upload.", statusCode: 400);
+    }
+
+    private static DateTimeOffset? PlayedAt(Demo d, Dictionary<long, DateTimeOffset> started)
+    {
+        if (d.MatchId is { } m && started.TryGetValue(m, out var t)) return t;
+        // The game writes a replay when the match ends; it's never touched again.
+        if (d.Source == DemoSource.LocalReplay && d.DurationSeconds is { } secs && File.Exists(d.FilePath))
+            return new DateTimeOffset(File.GetLastWriteTimeUtc(d.FilePath)).AddSeconds(-secs);
+        return null;
     }
 
     internal static DemoSummaryDto ToSummary(Demo d, ParseQueue queue) => new(

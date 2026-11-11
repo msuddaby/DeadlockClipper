@@ -134,6 +134,33 @@ public class CaptionTests
         Assert.Equal("Holliday  ·  Kill Compilation  ·  3 kills  ·  Match 135555232", job.IntroSubtitle);
     }
 
+    [Fact]
+    public void TeamFightJob_HasNoNumberedMarkers_AndFollowsEachSegmentsTopKiller()
+    {
+        var (analysis, _) = CsgDoubleKill();
+        var enemy = new PlayerInfo(2, "Enemy", Team.Amber, 7, 0, 0, 0, 0, TopBarSlot: 3);
+        KillEvent Kill(int tick, ulong attacker) => new(tick, tick / 64.0, attacker, "", 0, 50, "v", 1, "", []);
+        var kills = Enumerable.Range(0, 8).Select(i => Kill(64_000 + i * 640, i < 5 ? Csg : 2UL)).ToArray();
+        var fights = new DenseFightDetector().Detect(new DetectionContext(64, 200_000, [analysis.Players[0], enemy], kills)).ToList();
+        var fight = Assert.Single(fights);
+        var withEnemy = analysis with { Players = [analysis.Players[0], enemy], Kills = kills };
+
+        var job = CaptionPlan.CreateJob("j", "d", "/x.dem", withEnemy, fight, "/o.mp4", _ => "Holliday");
+
+        Assert.All(job.KillMarks, k => Assert.False(k.ShowMarker));
+        Assert.True(job.KillMarks[^1].IsFinal);
+        Assert.Equal("TEAMFIGHT", job.HighlightLabel);
+        Assert.Equal("Teamfight  ·  8 kills  ·  Hidden King 3–5 Archmother  ·  16:40  ·  Match 135555232", job.IntroSubtitle);
+        // Segments with Csg's kills point at slot 12, the last ones (enemy's kills) at slot 3.
+        Assert.Equal(12, job.SlotFor(0));
+        Assert.Equal(3, job.SlotFor(job.Segments!.Count - 1));
+
+        // Only the final banner and intro are drawn; no "1 KILL, 2 KILL..." for a fight.
+        var cues = DeadlockClipper.Render.Overlays.OverlayTimeline.Plan(job).Cues;
+        Assert.DoesNotContain(cues, c => c.Kind == DeadlockClipper.Render.Overlays.OverlayKind.Kill);
+        Assert.Contains(cues, c => c.Kind == DeadlockClipper.Render.Overlays.OverlayKind.Final);
+    }
+
     /// <summary>The real ffmpeg command on synthetic recordings: segments joined, plain captions, one without audio.</summary>
     [Fact]
     public async Task Finisher_JoinsSegmentsToThePlannedLength()

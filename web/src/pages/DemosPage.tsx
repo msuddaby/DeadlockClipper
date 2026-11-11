@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
-import { api, type DemoSummary } from '../api'
+import { api, type DemoOverview, type DemoSummary, type HighlightType } from '../api'
 import UploadDropzone from '../components/UploadDropzone'
-import { formatBytes, formatClock, formatDate } from '../format'
+import { formatBytes, formatClock, formatDate, highlightLabel, teamName, useHeroNames, useMe } from '../format'
 
 const isBusy = (d: DemoSummary) => d.status === 'Downloading' || d.status === 'Queued' || d.status === 'Parsing'
 
@@ -22,6 +22,8 @@ export default function DemosPage() {
   const importLocal = useMutation({ mutationFn: api.importLocal, onSuccess: refresh })
   const remove = useMutation({ mutationFn: api.deleteDemo, onSuccess: refresh })
   const reparse = useMutation({ mutationFn: api.reparse, onSuccess: refresh })
+  const heroName = useHeroNames()
+  const [me] = useMe()
   const cancelDownload = useMutation({ mutationFn: api.cancelDownload, onSuccess: refresh })
 
   return (
@@ -85,11 +87,11 @@ export default function DemosPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>Demo</th>
-                <th>Status</th>
-                <th>Duration</th>
-                <th>Highlights</th>
-                <th>Added</th>
+                <th>Match</th>
+                <th>Result</th>
+                <th>{me ? 'You' : 'Players'}</th>
+                <th>{me ? 'Your highlights' : 'Highlights'}</th>
+                <th>Length</th>
                 <th />
               </tr>
             </thead>
@@ -101,15 +103,17 @@ export default function DemosPage() {
                       {d.matchId ? `Match ${d.matchId}` : d.fileName}
                     </Link>
                     <div className="muted small">
-                      {d.source === 'LocalReplay' ? 'Local replay' : d.source === 'MatchId' ? 'Downloaded' : d.source} · {formatBytes(d.sizeBytes)}
+                      {d.playedAt ? `played ${formatDate(d.playedAt)}` : `added ${formatDate(d.createdAt)}`} ·{' '}
+                      {d.source === 'LocalReplay' ? 'local replay' : d.source === 'MatchId' ? 'downloaded' : 'uploaded'} ·{' '}
+                      {formatBytes(d.sizeBytes)}
                     </div>
                   </td>
                   <td>
-                    <StatusCell demo={d} />
+                    {d.overview && d.status === 'Done' ? <ResultCell o={d.overview} me={me} /> : <StatusCell demo={d} />}
                   </td>
-                  <td>{d.durationSeconds != null ? formatClock(d.durationSeconds) : '–'}</td>
-                  <td>{d.highlightCount ?? '–'}</td>
-                  <td className="small">{formatDate(d.createdAt)}</td>
+                  <td>{d.overview ? <MeCell o={d.overview} me={me} heroName={heroName} /> : <span className="muted">–</span>}</td>
+                  <td>{d.overview ? <HighlightsCell o={d.overview} me={me} /> : <span className="muted">–</span>}</td>
+                  <td className="mono">{d.durationSeconds != null ? formatClock(d.durationSeconds) : '–'}</td>
                   <td className="actions">
                     {d.status === 'Downloading' && (
                       <button className="button ghost danger" onClick={() => cancelDownload.mutate(d.id)}>
@@ -154,6 +158,73 @@ function StatusCell({ demo }: { demo: DemoSummary }) {
           {demo.error}
         </div>
       )}
+    </div>
+  )
+}
+
+const short: Record<HighlightType, string> = {
+  ...highlightLabel,
+  KillCompilation: 'Compilation',
+}
+
+function ResultCell({ o, me }: { o: DemoOverview; me: string | null }) {
+  const mine = o.players.find((p) => p.steamId === me)
+  if (o.winningTeam === 'Unknown') return <span className="muted small">No result</span>
+  if (mine) {
+    const won = mine.team === o.winningTeam
+    return (
+      <div>
+        <span className={`badge ${won ? 'done' : 'failed'}`}>{won ? 'Win' : 'Loss'}</span>
+        <div className={`small team-${mine.team.toLowerCase()}`}>{teamName(mine.team)}</div>
+      </div>
+    )
+  }
+  return <span className={`small team-${o.winningTeam.toLowerCase()}`}>{teamName(o.winningTeam)} won</span>
+}
+
+function MeCell({ o, me, heroName }: { o: DemoOverview; me: string | null; heroName: (id: number) => string }) {
+  const mine = o.players.find((p) => p.steamId === me)
+  if (!mine) {
+    // Not in this match (or no "me" set): the top fragger says most about the game.
+    const top = [...o.players].sort((a, b) => b.kills - a.kills)[0]
+    return top ? (
+      <span className="small">
+        <span className="muted">Top: </span>
+        {top.name} ({heroName(top.heroId)}) {top.kills}/{top.deaths}/{top.assists}
+      </span>
+    ) : null
+  }
+  const teamKills = o.players.filter((p) => p.team === mine.team).reduce((n, p) => n + p.kills, 0)
+  return (
+    <div>
+      <strong>{heroName(mine.heroId)}</strong>{' '}
+      <span className="mono">
+        {mine.kills}/{mine.deaths}/{mine.assists}
+      </span>
+      <div className="muted small">
+        {(mine.netWorth / 1000).toFixed(1)}k souls
+        {teamKills > 0 && ` · in ${Math.round(((mine.kills + mine.assists) / teamKills) * 100)}% of team kills`}
+      </div>
+    </div>
+  )
+}
+
+function HighlightsCell({ o, me }: { o: DemoOverview; me: string | null }) {
+  const inMatch = o.players.some((p) => p.steamId === me)
+  const list = inMatch
+    ? o.highlights.filter((h) => h.playerSteamId === me || (h.type === 'TeamFight' && h.participants.includes(me!)))
+    : o.highlights
+  if (list.length === 0) return <span className="muted small">none</span>
+  const counts = new Map<HighlightType, number>()
+  for (const h of list) counts.set(h.type, (counts.get(h.type) ?? 0) + 1)
+  return (
+    <div className="hl-chips">
+      {[...counts.entries()].map(([type, n]) => (
+        <span key={type} className={`badge hl-${type.toLowerCase()}`}>
+          {n > 1 ? `${n}× ` : ''}
+          {short[type]}
+        </span>
+      ))}
     </div>
   )
 }

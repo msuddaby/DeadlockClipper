@@ -3,7 +3,7 @@
 export type DemoSource = 'Upload' | 'LocalReplay' | 'MatchId'
 export type DemoStatus = 'Downloading' | 'Queued' | 'Parsing' | 'Done' | 'Failed'
 export type Team = 'Unknown' | 'Spectator' | 'Amber' | 'Sapphire'
-export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation'
+export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation' | 'TeamFight'
 
 export interface DemoSummary {
   id: string
@@ -19,6 +19,25 @@ export interface DemoSummary {
   highlightCount: number | null
   createdAt: string
   parsedAt: string | null
+  overview: DemoOverview | null
+  /** When the match was played, if known. */
+  playedAt: string | null
+}
+
+export interface DemoOverview {
+  winningTeam: Team
+  heroKills: number
+  players: {
+    steamId: string
+    name: string
+    heroId: number
+    team: Team
+    kills: number
+    deaths: number
+    assists: number
+    netWorth: number
+  }[]
+  highlights: { type: HighlightType; playerSteamId: string; timeSeconds: number; kills: number; participants: string[] }[]
 }
 
 export interface PlayerInfo {
@@ -62,9 +81,20 @@ export interface Highlight {
   clipEndTick: number
   score: number
   kills: KillEvent[]
+  /** Set when the clip is several pieces of the demo joined (compilations, teamfights). */
+  segments: ClipSegment[] | null
+}
+
+export interface ClipSegment {
+  startTick: number
+  endTick: number
+  /** Player the camera follows in this segment. */
+  focusSteamId: string | null
 }
 
 export interface MatchAnalysis {
+  /** 'Unknown' when the demo ends before the Patron falls. */
+  winningTeam: Team
   matchId: number | null
   map: string
   buildNumber: number
@@ -265,6 +295,7 @@ export const api = {
     }),
   removeSteamAccount: (name: string) =>
     request<void>(`/api/steam/accounts/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  scannedPlayers: () => request<string[]>('/api/matches/players'),
   matches: (steamId: string) => request<ScannedMatch[]>(`/api/matches?steamId=${steamId}`),
   scanMatches: (steamId: string, older = false) =>
     request<ScanResult>('/api/matches/scan', {

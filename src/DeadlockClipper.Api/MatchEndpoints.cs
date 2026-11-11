@@ -85,6 +85,11 @@ public static class MatchEndpoints
             }
         });
 
+        // Whose histories have been scanned (SteamID64 strings), most matches first: lets the page recover "me".
+        api.MapGet("/matches/players", async (AppDbContext db) =>
+            (await db.Matches.GroupBy(m => m.PlayerSteamId).Select(g => new { g.Key, Count = g.Count() }).ToListAsync())
+                .OrderByDescending(x => x.Count).Select(x => x.Key.ToString()));
+
         api.MapGet("/matches", async (string steamId, AppDbContext db, JsonSerializerOptions json) =>
         {
             if (!ulong.TryParse(steamId, out var id)) return Results.Problem("Invalid steamId.", statusCode: 400);

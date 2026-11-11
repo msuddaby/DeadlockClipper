@@ -13,7 +13,7 @@ import {
   type Team,
 } from '../api'
 import HealthBanner from '../components/HealthBanner'
-import { compilationId, formatClock, highlightLabel, useHeroNames, useMe } from '../format'
+import { compilationId, formatClock, highlightLabel, teamName, useHeroNames, useMe } from '../format'
 import { renderStatusText, useRenderHealth, useRenders } from '../renders'
 
 export default function DemoPage() {
@@ -45,6 +45,9 @@ export default function DemoPage() {
           <div className="muted">
             {analysis ? (
               <>
+                {analysis.winningTeam !== 'Unknown' && (
+                  <strong className={`team-${analysis.winningTeam.toLowerCase()}`}>{teamName(analysis.winningTeam)} won · </strong>
+                )}
                 {formatClock(analysis.durationSeconds)} · {analysis.kills.length} hero kills ·{' '}
                 {analysis.tickRate.toFixed(0)} tick · build {analysis.buildNumber}
               </>
@@ -116,6 +119,8 @@ function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: strin
   const heroName = useHeroNames()
   const [me, setMe] = useMe()
   const meInMatch = analysis.players.some((p) => p.steamId === me)
+  const players = useMemo(() => new Map(analysis.players.map((p) => [p.steamId, p])), [analysis.players])
+  const myTeam = players.get(me ?? '')?.team
   const [onlyMe, setOnlyMe] = useState(true)
   const filterToMe = onlyMe && meInMatch
 
@@ -132,19 +137,32 @@ function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: strin
     mutationFn: () => api.renderPlayer(demoId, me!),
     onSuccess: refreshRenders,
   })
+  // A teamfight counts as mine if I killed, died or assisted in it, not only when I topped it.
+  const involvesMe = (h: Highlight) =>
+    h.playerSteamId === me ||
+    (h.type === 'TeamFight' &&
+      h.kills.some((k) => k.attackerSteamId === me || k.victimSteamId === me || k.assisterSteamIds.includes(me ?? '')))
   const myHighlights = analysis.highlights.filter((h) => h.playerSteamId === me)
   const myUnrendered = myHighlights.filter((h) => !rendersByHighlight.has(h.id))
 
-  const highlights = filterToMe ? analysis.highlights.filter((h) => h.playerSteamId === me) : analysis.highlights
+  const highlights = filterToMe ? analysis.highlights.filter(involvesMe) : analysis.highlights
   const teams: Team[] = ['Amber', 'Sapphire']
 
   return (
     <>
+      {myTeam && analysis.winningTeam !== 'Unknown' && (
+        <div className={`result-banner ${analysis.winningTeam === myTeam ? 'win' : 'loss'}`}>
+          {analysis.winningTeam === myTeam ? 'Victory' : 'Defeat'}
+          <span className="small"> · you played {heroName(players.get(me!)!.heroId)} for {teamName(myTeam)}</span>
+        </div>
+      )}
+
       <section className="grid-2">
         {teams.map((team) => (
           <Roster
             key={team}
             team={team}
+            won={analysis.winningTeam === team}
             players={analysis.players.filter((p) => p.team === team)}
             me={me}
             onSetMe={setMe}
@@ -180,7 +198,7 @@ function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: strin
           <p className="muted small">Tip: click ☆ next to your name in a roster to filter highlights to yourself.</p>
         )}
         {highlights.length === 0 ? (
-          <p className="muted">No multikills{filterToMe ? ' for you' : ''} in this match.</p>
+          <p className="muted">No highlights{filterToMe ? ' for you' : ''} in this match.</p>
         ) : (
           <ul className="list">
             {highlights.map((h) => (
@@ -193,6 +211,8 @@ function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: strin
                 onChanged={refreshRenders}
                 heroName={heroName}
                 tickRate={analysis.tickRate}
+                players={players}
+                me={me}
               />
             ))}
           </ul>
@@ -209,19 +229,21 @@ function Analysis({ analysis, demoId }: { analysis: MatchAnalysis; demoId: strin
         heroName={heroName}
       />
 
-      <KillFeed kills={analysis.kills} heroName={heroName} me={me} />
+      <KillFeed kills={analysis.kills} heroName={heroName} me={me} players={players} />
     </>
   )
 }
 
 function Roster({
   team,
+  won,
   players,
   me,
   onSetMe,
   heroName,
 }: {
   team: Team
+  won: boolean
   players: PlayerInfo[]
   me: string | null
   onSetMe: (id: string | null) => void
@@ -229,7 +251,9 @@ function Roster({
 }) {
   return (
     <div className={`card roster ${team.toLowerCase()}`}>
-      <h2>{team === 'Amber' ? 'Amber Hand' : 'Sapphire Flame'}</h2>
+      <h2>
+        {teamName(team)} {won && <span className="badge done">Won</span>}
+      </h2>
       <table className="table compact">
         <thead>
           <tr>
@@ -277,6 +301,8 @@ function HighlightRow({
   onChanged,
   heroName,
   tickRate,
+  players,
+  me,
 }: {
   h: Highlight
   demoId: string
@@ -285,9 +311,13 @@ function HighlightRow({
   onChanged: () => void
   heroName: (id: number) => string
   tickRate: number
+  players: Map<string, PlayerInfo>
+  me: string | null
 }) {
   const [open, setOpen] = useState(false)
-  const clipSeconds = (h.clipEndTick - h.clipStartTick) / tickRate
+  const clipSeconds = h.segments
+    ? h.segments.reduce((sum, s) => sum + s.endTick - s.startTick, 0) / tickRate
+    : (h.clipEndTick - h.clipStartTick) / tickRate
   const start = useMutation({ mutationFn: () => api.renderHighlight(demoId, h.id), onSuccess: onChanged })
   const ready = render?.status === 'Done' && render.hasVideo
   return (
@@ -295,9 +325,14 @@ function HighlightRow({
       <div className="highlight-row">
         <button className="highlight-main" onClick={() => setOpen((o) => !o)}>
           <span className={`badge hl-${h.type.toLowerCase()}`}>{highlightLabel[h.type]}</span>
-          <span>
-            <strong>{h.playerName}</strong> <span className="muted">({heroName(h.heroId)})</span>
-          </span>
+          {h.type === 'TeamFight' ? (
+            <FightSummary h={h} players={players} heroName={heroName} me={me} />
+          ) : (
+            <span>
+              <strong>{h.playerName}</strong> <span className="muted">({heroName(h.heroId)})</span>
+              {h.type !== 'KillCompilation' && <span className="muted small"> · {h.kills.length} kills</span>}
+            </span>
+          )}
           <span className="mono">{formatClock(h.startTimeSeconds)}</span>
           <span className="muted small mono">{clipSeconds.toFixed(0)}s clip</span>
           <span className="muted small">{open ? '▾' : '▸'}</span>
@@ -333,9 +368,16 @@ function HighlightRow({
       {open && (
         <ul className="kills-inline">
           {h.kills.map((k) => (
-            <li key={k.tick + k.victimSteamId} className="mono small">
-              {formatClock(k.gameTimeSeconds)} → {k.victimName} ({heroName(k.victimHeroId)}){' '}
-              {k.weapon && <span className="muted">[{k.weapon}]</span>}
+            <li key={k.tick + k.victimSteamId} className="small">
+              <span className="mono">{formatClock(k.gameTimeSeconds)}</span>{' '}
+              {h.type === 'TeamFight' && (
+                <>
+                  <PlayerTag id={k.attackerSteamId} players={players} heroName={heroName} me={me} /> →{' '}
+                </>
+              )}
+              <PlayerTag id={k.victimSteamId} players={players} heroName={heroName} me={me} />
+              <Assists ids={k.assisterSteamIds} players={players} me={me} />{' '}
+              {k.weapon && <span className="muted mono">[{k.weapon}]</span>}
             </li>
           ))}
         </ul>
@@ -463,7 +505,17 @@ function CompilationRow({
   )
 }
 
-function KillFeed({ kills, heroName, me }: { kills: KillEvent[]; heroName: (id: number) => string; me: string | null }) {
+function KillFeed({
+  kills,
+  heroName,
+  me,
+  players,
+}: {
+  kills: KillEvent[]
+  heroName: (id: number) => string
+  me: string | null
+  players: Map<string, PlayerInfo>
+}) {
   const [heroOnly, setHeroOnly] = useState(true)
   const shown = useMemo(() => (heroOnly ? kills.filter((k) => k.attackerSteamId) : kills), [kills, heroOnly])
   return (
@@ -481,6 +533,7 @@ function KillFeed({ kills, heroName, me }: { kills: KillEvent[]; heroName: (id: 
             <th>Time</th>
             <th>Killer</th>
             <th>Victim</th>
+            <th>Assists</th>
             <th>Weapon / ability</th>
             <th className="num">Tick</th>
           </tr>
@@ -489,7 +542,11 @@ function KillFeed({ kills, heroName, me }: { kills: KillEvent[]; heroName: (id: 
           {shown.map((k) => (
             <tr
               key={`${k.tick}-${k.victimSteamId}`}
-              className={k.attackerSteamId === me || k.victimSteamId === me ? 'me' : undefined}
+              className={
+                k.attackerSteamId === me || k.victimSteamId === me || (me != null && k.assisterSteamIds.includes(me))
+                  ? 'me'
+                  : undefined
+              }
             >
               <td className="mono">{formatClock(k.gameTimeSeconds)}</td>
               <td>
@@ -499,6 +556,20 @@ function KillFeed({ kills, heroName, me }: { kills: KillEvent[]; heroName: (id: 
               <td>
                 {k.victimName} <span className="muted">({heroName(k.victimHeroId)})</span>
               </td>
+              <td className="small">
+                {k.assisterSteamIds.length === 0 ? (
+                  <span className="muted">–</span>
+                ) : (
+                  k.assisterSteamIds.map((id, i) => (
+                    <span key={id}>
+                      {i > 0 && ', '}
+                      <span className={id === me ? 'my-assist' : undefined} title={id === me ? 'Your assist' : undefined}>
+                        {players.get(id)?.name ?? 'Unknown'}
+                      </span>
+                    </span>
+                  ))
+                )}
+              </td>
               <td className="muted mono small">{k.weapon || '–'}</td>
               <td className="num mono small">{k.tick}</td>
             </tr>
@@ -506,5 +577,92 @@ function KillFeed({ kills, heroName, me }: { kills: KillEvent[]; heroName: (id: 
         </tbody>
       </table>
     </section>
+  )
+}
+
+/** One-line teamfight summary: kills per team, the top killers, and your part in it. */
+function FightSummary({
+  h,
+  players,
+  heroName,
+  me,
+}: {
+  h: Highlight
+  players: Map<string, PlayerInfo>
+  heroName: (id: number) => string
+  me: string | null
+}) {
+  const teamOf = (id: string | null) => (id ? players.get(id)?.team : undefined)
+  const hk = h.kills.filter((k) => teamOf(k.attackerSteamId) === 'Amber').length
+  const am = h.kills.filter((k) => teamOf(k.attackerSteamId) === 'Sapphire').length
+  const byKiller = new Map<string, number>()
+  for (const k of h.kills) if (k.attackerSteamId) byKiller.set(k.attackerSteamId, (byKiller.get(k.attackerSteamId) ?? 0) + 1)
+  const top = [...byKiller.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2)
+  const mine = me
+    ? {
+        kills: h.kills.filter((k) => k.attackerSteamId === me).length,
+        assists: h.kills.filter((k) => k.assisterSteamIds.includes(me)).length,
+        deaths: h.kills.filter((k) => k.victimSteamId === me).length,
+      }
+    : null
+  const involved = mine && mine.kills + mine.assists + mine.deaths > 0
+  return (
+    <span>
+      <strong>{h.kills.length} kills</strong>{' '}
+      <span className="small">
+        (<span className="team-amber">{teamName('Amber')} {hk}</span> – <span className="team-sapphire">{am} {teamName('Sapphire')}</span>)
+      </span>
+      <span className="muted small">
+        {' '}
+        · top:{' '}
+        {top.map(([id, n], i) => (
+          <span key={id}>
+            {i > 0 && ', '}
+            {players.get(id)?.name ?? 'Unknown'} ({heroName(players.get(id)?.heroId ?? 0)}) {n}
+          </span>
+        ))}
+      </span>
+      {involved && (
+        <span className="small my-assist">
+          {' '}
+          · you {mine.kills}/{mine.deaths}/{mine.assists}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function PlayerTag({
+  id,
+  players,
+  heroName,
+  me,
+}: {
+  id: string | null
+  players: Map<string, PlayerInfo>
+  heroName: (id: number) => string
+  me: string | null
+}) {
+  const p = id ? players.get(id) : undefined
+  if (!p) return <span className="muted">World</span>
+  return (
+    <span className={`team-${p.team.toLowerCase()}${id === me ? ' me-name' : ''}`}>
+      {p.name} <span className="muted">({heroName(p.heroId)})</span>
+    </span>
+  )
+}
+
+function Assists({ ids, players, me }: { ids: string[]; players: Map<string, PlayerInfo>; me: string | null }) {
+  if (ids.length === 0) return null
+  return (
+    <span className="muted">
+      {' '}
+      + {ids.map((id, i) => (
+        <span key={id}>
+          {i > 0 && ', '}
+          <span className={id === me ? 'my-assist' : undefined}>{players.get(id)?.name ?? 'Unknown'}</span>
+        </span>
+      ))}
+    </span>
   )
 }

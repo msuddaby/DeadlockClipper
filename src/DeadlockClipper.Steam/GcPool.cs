@@ -13,8 +13,11 @@ public sealed class SteamOptions
     /// </summary>
     public double MetadataIntervalSeconds { get; set; } = 110;
 
-    /// <summary>Disconnect an account after this long without requests, so it doesn't sit "in game" all day.</summary>
-    public double IdleDisconnectSeconds { get; set; } = 120;
+    /// <summary>
+    /// Disconnect an account after this long without requests, so it doesn't sit "in game" all day. Longer than the
+    /// gap between an account's paced requests (several minutes with a few accounts), or every request reconnects.
+    /// </summary>
+    public double IdleDisconnectSeconds { get; set; } = 600;
 
     /// <summary>
     /// TEMPORARY quota measurement: retry a rate-limited account every <see cref="QuotaProbeRetryMinutes"/> instead of

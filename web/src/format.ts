@@ -27,6 +27,12 @@ export const highlightLabel: Record<HighlightType, string> = {
   PentaKill: 'Penta Kill',
   MegaKill: 'Mega Kill',
   KillCompilation: 'Kill Compilation',
+  TeamFight: 'Teamfight',
+}
+
+/** The teams' in-game names (the network/code names are Amber and Sapphire). */
+export function teamName(team: string): string {
+  return team === 'Amber' ? 'Hidden King' : team === 'Sapphire' ? 'Archmother' : team
 }
 
 /** Matches the backend's KillCompilation.IdFor. */

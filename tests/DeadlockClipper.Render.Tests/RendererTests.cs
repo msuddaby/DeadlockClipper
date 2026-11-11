@@ -200,6 +200,22 @@ public class RendererTests
     }
 
     [Fact]
+    public async Task SegmentedJob_PointsTheCameraPerSegment()
+    {
+        var (renderer, game, _) = Create();
+        var job = Job("fight", 30000, 45400, slot: 12) with
+        {
+            Segments = [new(30000, 30400), new(45000, 45400)],
+            SegmentTopBarSlots = [4, 9],
+        };
+
+        await renderer.RenderBatchAsync([job], null, default);
+
+        Assert.Equal(["citadel_spectate_topbar_player 4", "citadel_spectate_topbar_player 9"],
+            game.Log.Where(l => l.StartsWith("citadel_spectate_topbar_player")));
+    }
+
+    [Fact]
     public async Task SegmentedJobs_RenderAfterSingleClipsSoTheyShareAPass()
     {
         var (renderer, game, finisher) = Create();

@@ -20,6 +20,7 @@ public static class CaptionPlan
             throw new InvalidOperationException($"No top-bar slot for {player.Name}; cannot point the camera at them.");
 
         var label = Label(highlight.Type, highlight.Kills.Count);
+        var fight = highlight.Type == HighlightType.TeamFight;
         var segments = highlight.Segments is { Count: > 0 } s
             ? s
             : [new ClipSegment(highlight.ClipStartTick, highlight.ClipEndTick)];
@@ -30,18 +31,29 @@ public static class CaptionPlan
                 Label: i == highlight.Kills.Count - 1 ? label : "KILL",
                 IsFinal: i == highlight.Kills.Count - 1,
                 VictimName: k.VictimName,
-                VictimHeroId: k.VictimHeroId))
+                VictimHeroId: k.VictimHeroId,
+                ShowMarker: !fight))
             .ToList();
 
         var hero = heroName?.Invoke(highlight.HeroId);
         var compilation = highlight.Type == HighlightType.KillCompilation;
-        var subtitle = string.Join("  ·  ", new[]
-        {
-            hero,
-            compilation ? "Kill Compilation" : ToTitleCase(label),
-            compilation ? $"{highlight.Kills.Count} kills" : FormatClock(highlight.StartTimeSeconds),
-            analysis.MatchId is { } m ? $"Match {m}" : null,
-        }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var subtitle = string.Join("  ·  ", (fight
+            ? new[] { "Teamfight", $"{highlight.Kills.Count} kills", TeamScore(analysis, highlight), FormatClock(highlight.StartTimeSeconds) }
+            : new[]
+            {
+                hero,
+                compilation ? "Kill Compilation" : ToTitleCase(label),
+                compilation ? $"{highlight.Kills.Count} kills" : FormatClock(highlight.StartTimeSeconds),
+            })
+            .Append(analysis.MatchId is { } m ? $"Match {m}" : null)
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+
+        // Segments with their own camera target follow that player, if the game can point at them.
+        var slots = highlight.Segments is { Count: > 0 } && segments.Any(s => s.FocusSteamId != null)
+            ? segments.Select(s => analysis.Players.FirstOrDefault(p => p.SteamId == s.FocusSteamId)?.TopBarSlot is >= 1 and <= 12 and var slot
+                ? slot
+                : player.TopBarSlot).ToList()
+            : null;
 
         return new RenderJob(
             JobId: jobId,
@@ -59,7 +71,18 @@ public static class CaptionPlan
             PlayerName: player.Name,
             PlayerHeroId: highlight.HeroId,
             HighlightLabel: label,
-            Segments: highlight.Segments is { Count: > 0 } ? segments : null);
+            Segments: highlight.Segments is { Count: > 0 } ? segments : null,
+            SegmentTopBarSlots: slots);
+    }
+
+    /// <summary>"Hidden King 6–3 Archmother": kills per team in the fight, by the teams' in-game names.</summary>
+    private static string? TeamScore(MatchAnalysis analysis, Highlight highlight)
+    {
+        var teams = analysis.Players.ToDictionary(p => p.SteamId, p => p.Team);
+        int Count(Team t) => highlight.Kills.Count(k => k.AttackerSteamId is { } a && teams.GetValueOrDefault(a) == t);
+        var amber = Count(Team.Amber);
+        var sapphire = Count(Team.Sapphire);
+        return amber + sapphire == 0 ? null : $"Hidden King {amber}–{sapphire} Archmother";
     }
 
     /// <summary>Seconds from the start of the finished clip to <paramref name="tick"/>, with the segments back to back.</summary>
@@ -77,6 +100,7 @@ public static class CaptionPlan
     public static string Label(HighlightType type, int kills = 0) => type switch
     {
         HighlightType.KillCompilation => $"{kills} KILLS",
+        HighlightType.TeamFight => "TEAMFIGHT",
         HighlightType.DoubleKill => "DOUBLE KILL",
         HighlightType.TripleKill => "TRIPLE KILL",
         HighlightType.QuadKill => "QUAD KILL",

@@ -27,6 +27,7 @@ builder.Services.AddDbContext<AppDbContext>((sp, o) =>
 
 // Register every highlight detector here; DemoAnalyzer receives them all via IEnumerable<IHighlightDetector>.
 builder.Services.AddSingleton<IHighlightDetector>(_ => new MultiKillDetector());
+builder.Services.AddSingleton<IHighlightDetector>(_ => new DenseFightDetector());
 builder.Services.AddSingleton<DemoAnalyzer>();
 builder.Services.AddSingleton<ParseQueue>();
 builder.Services.AddHostedService<ParseWorker>();

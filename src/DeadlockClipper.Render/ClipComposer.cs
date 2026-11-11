@@ -38,6 +38,7 @@ public static class ClipComposer
         for (var i = 0; i < job.KillMarks.Count; i++)
         {
             var mark = job.KillMarks[i];
+            if (!mark.ShowMarker && !mark.IsFinal) continue;
             var end = Math.Min(mark.OffsetSeconds + (mark.IsFinal ? FinalHold : KillHold), duration);
             // A "KILL" would overlap the next caption; cut it short when kills are close together.
             if (!mark.IsFinal && i + 1 < job.KillMarks.Count)

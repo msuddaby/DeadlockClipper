@@ -7,11 +7,14 @@ namespace DeadlockClipper.Core.Parsing;
 /// <summary>Parses a Deadlock .dem in a single pass and runs highlight detectors over the result.</summary>
 public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = null)
 {
-    /// <summary>Bump when MatchAnalysis gains data that stored analyses need (v2: top-bar slots, highlight ids).</summary>
-    public const int Version = 2;
+    /// <summary>
+    /// Bump when MatchAnalysis gains data that stored analyses need; older ones are re-parsed on startup.
+    /// v2: top-bar slots, highlight ids. v3: teamfight highlights. v4: winning team.
+    /// </summary>
+    public const int Version = 4;
 
     private const double DefaultTickRate = 64;
-    private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector()];
+    private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector(), new DenseFightDetector()];
 
     public async Task<MatchAnalysis> AnalyzeFileAsync(string path, IProgress<double>? progress = null, CancellationToken ct = default)
     {
@@ -59,6 +62,10 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
                     .ToArray()));
         };
 
+        // Sent once when the Patron falls; winning_team is a CitadelTeamNum (2/3), checked against real matches.
+        int? winningTeam = null;
+        demo.UserMessageEvents.GameOver += e => winningTeam = e.WinningTeam;
+
         long? matchId = null;
         var reader = DemoFileReader.Create(demo, progress is null ? stream : new ProgressStream(stream, progress));
         await reader.ReadAllAsync(ct);
@@ -89,7 +96,8 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
             DurationSeconds: MatchClock(demo),
             Players: playerList,
             Kills: kills,
-            Highlights: highlights);
+            Highlights: highlights,
+            WinningTeam: winningTeam is 2 or 3 ? (Team)winningTeam.Value : Team.Unknown);
 
         void Snapshot(CCitadelPlayerController c)
         {

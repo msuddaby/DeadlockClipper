@@ -46,6 +46,7 @@ public static class OverlayTimeline
         var kills = job.KillMarks.OrderBy(k => k.OffsetSeconds).ToList();
         for (var i = 0; i < kills.Count; i++)
         {
+            if (!kills[i].ShowMarker) continue;
             var start = kills[i].OffsetSeconds + MarkerDelay;
             if (start >= duration) continue;
             var end = start + (i == kills.Count - 1 ? LastKillHold : KillHold);

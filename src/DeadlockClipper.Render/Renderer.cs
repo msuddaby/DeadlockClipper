@@ -103,7 +103,7 @@ public sealed class Renderer(
 
             // Re-sent per segment: a seek can drop the spectator back to the default camera.
             await game.SendAsync(string.Join('\n',
-                $"citadel_spectate_topbar_player {job.TopBarSlot}",
+                $"citadel_spectate_topbar_player {job.SlotFor(n)}",
                 "citadel_hud_visible 1",
                 "citadel_hide_replay_hud 1"), ct);
             await _delay(TimeSpan.FromSeconds(2), ct);

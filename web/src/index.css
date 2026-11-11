@@ -289,6 +289,9 @@ progress.wide {
 .badge.hl-quadkill {
   color: #ff9cd2;
 }
+.badge.hl-teamfight {
+  color: #ffb36b;
+}
 .badge.hl-killcompilation {
   color: #8fe3b0;
 }
@@ -525,4 +528,41 @@ progress.wide {
   align-items: center;
   flex-wrap: wrap;
   margin-top: 12px;
+}
+
+.team-amber {
+  color: var(--amber);
+}
+.team-sapphire {
+  color: var(--sapphire);
+}
+.my-assist {
+  color: var(--accent);
+  font-weight: 700;
+}
+.me-name {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.result-banner {
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  border: 1px solid var(--border);
+}
+.result-banner.win {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+}
+.result-banner.loss {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+}
+.result-banner .small {
+  font-weight: 400;
+  color: var(--muted);
 }
