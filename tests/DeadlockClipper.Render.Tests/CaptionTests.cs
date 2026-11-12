@@ -176,6 +176,15 @@ public class CaptionTests
         Assert.Equal("TRIPLE TAKEDOWN", job.KillMarks[^1].Label);
     }
 
+    [Fact]
+    public void EncodeArgs_UseTheMeasuredDefaults_AndTheCapIsOptional()
+    {
+        Assert.Equal(["-c:v", "libx264", "-preset", "slow", "-crf", "24", "-maxrate", "12000k", "-bufsize", "24000k"],
+            ClipComposer.VideoEncodeArgs(new RenderOptions()));
+        Assert.Equal(["-c:v", "libx264", "-preset", "medium", "-crf", "20"],
+            ClipComposer.VideoEncodeArgs(new RenderOptions { Crf = 20, X264Preset = "medium", MaxBitrateKbps = 0 }));
+    }
+
     /// <summary>The real ffmpeg command on synthetic recordings: segments joined, plain captions, one without audio.</summary>
     [Fact]
     public async Task Finisher_JoinsSegmentsToThePlannedLength()

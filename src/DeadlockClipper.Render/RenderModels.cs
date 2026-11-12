@@ -29,6 +29,12 @@ public sealed class RenderOptions
     public string VideoEncoder { get; set; } = "vah264enc";
     public int VideoBitrateKbps { get; set; } = 12000;
 
+    /// <summary>Finished clip quality (libx264 CRF: lower is better and bigger). See ClipComposer.VideoEncodeArgs.</summary>
+    public int Crf { get; set; } = 24;
+    public string X264Preset { get; set; } = "slow";
+    /// <summary>Peak bitrate cap for the finished clip, in kbit/s; 0 for none.</summary>
+    public int MaxBitrateKbps { get; set; } = 12000;
+
     /// <summary>Where finished clips are written.</summary>
     public string OutputDir { get; set; } = "";
     /// <summary>Scratch space for raw recordings; cleaned per job.</summary>

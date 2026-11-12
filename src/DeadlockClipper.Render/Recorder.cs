@@ -132,7 +132,8 @@ public sealed class ClipFinisher(RenderOptions options, IProcessRunner runner, O
         args.AddRange([
             "-filter_complex", string.Join(';', graph),
             "-map", "[vout]", "-map", "[aout]", "-t", duration,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+            .. ClipComposer.VideoEncodeArgs(options),
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart",
             tmp,

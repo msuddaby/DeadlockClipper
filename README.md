@@ -86,6 +86,7 @@ The same CLI has `history`, `salts`, `meta` and `download` commands for debuggin
 | `Clipper:Render:OutputDir` | `~/Videos/Deadlock Clips` | Finished clips |
 | `Clipper:Render:Width` / `Height` / `Fps` | 1920 / 1080 / 60 | Render resolution |
 | `Clipper:Render:PreRollSeconds` | 5 | Playback before each clip/segment that's recorded then cut, so the post-jump stutter isn't in the clip |
+| `Clipper:Render:Crf` / `X264Preset` / `MaxBitrateKbps` | 24 / slow / 12000 | Finished clip encode (~12 Mbit/s at 1080p60; lower CRF = better and bigger) |
 | `Clipper:Render:VideoEncoder` | `vah264enc` | GStreamer encoder for the raw capture (`x264enc` for CPU) |
 
 ## Tests

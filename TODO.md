@@ -14,7 +14,8 @@
    Dynamo ultimate pulling the whole team in while teammates take the kills. Score and clip assist bursts like
    multikills. Note: match metadata only records each death's killer, not assisters, so this can only be detected
    from the demo (`KillEvent.AssisterSteamIds`), not during the no-download scan.
-7. [ ] **Smaller clip files.** Clips are already H.264 (libx264 `-preset medium -crf 20`, AAC 160k), but that comes out
+7. [x] **Smaller clip files.** (Now CRF 24 / slow / 12 Mbit/s cap: 35% smaller at VMAF 95.6, approved by eye.
+   A size-targeted "share" preset is still open if wanted.) Clips are already H.264 (libx264 `-preset medium -crf 20`, AAC 160k), but that comes out
    at ~15 Mbit/s for 1080p60 (an 80 s reel was 153 MB). Try `-crf 23 -preset slow` with a bitrate cap
    (`-maxrate 8M -bufsize 16M`) and compare quality by eye; roughly half the size is likely. Maybe add a
    "share" preset that targets a file size (e.g. Discord's upload limit) with two-pass encoding. The raw capture is
