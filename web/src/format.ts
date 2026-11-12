@@ -28,6 +28,13 @@ export const highlightLabel: Record<HighlightType, string> = {
   MegaKill: 'Mega Kill',
   KillCompilation: 'Kill Compilation',
   TeamFight: 'Teamfight',
+  TakedownStreak: 'Takedowns',
+}
+
+/** "Triple Takedown" etc. for takedown streaks (the type is shared); the plain label otherwise. */
+export function highlightName(type: HighlightType, kills: number): string {
+  if (type !== 'TakedownStreak') return highlightLabel[type]
+  return `${kills <= 3 ? 'Triple' : kills === 4 ? 'Quad' : kills === 5 ? 'Penta' : 'Mega'} Takedown`
 }
 
 /** The teams' in-game names (the network/code names are Amber and Sapphire). */

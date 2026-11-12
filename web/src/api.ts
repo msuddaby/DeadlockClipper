@@ -3,7 +3,7 @@
 export type DemoSource = 'Upload' | 'LocalReplay' | 'MatchId'
 export type DemoStatus = 'Downloading' | 'Queued' | 'Parsing' | 'Done' | 'Failed'
 export type Team = 'Unknown' | 'Spectator' | 'Amber' | 'Sapphire'
-export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation' | 'TeamFight'
+export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation' | 'TeamFight' | 'TakedownStreak'
 
 export interface DemoSummary {
   id: string

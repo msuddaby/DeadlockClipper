@@ -9,7 +9,8 @@
    history + metadata via secondary Steam accounts; demos downloaded in-app. Throughput is bounded by Valve's
    per-account rate limit, see item 8.)
 5. [ ] *(minor)* **Stuttering** in rendered clips: investigate.
-6. [ ] *(lower priority)* **Count assists in highlights.** Several assists close together can be the real play: a
+6. [x] *(lower priority)* **Count assists in highlights.** (TakedownDetector: kills + assists within 10 s, 3+ with an
+   assist, e.g. the 34:39 Dynamo-ult play in match 135279703.) Several assists close together can be the real play: a
    Dynamo ultimate pulling the whole team in while teammates take the kills. Score and clip assist bursts like
    multikills. Note: match metadata only records each death's killer, not assisters, so this can only be detected
    from the demo (`KillEvent.AssisterSteamIds`), not during the no-download scan.

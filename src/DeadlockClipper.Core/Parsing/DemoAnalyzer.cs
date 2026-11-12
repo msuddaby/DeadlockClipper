@@ -9,12 +9,12 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
 {
     /// <summary>
     /// Bump when MatchAnalysis gains data that stored analyses need; older ones are re-parsed on startup.
-    /// v2: top-bar slots, highlight ids. v3: teamfight highlights. v4: winning team.
+    /// v2: top-bar slots, highlight ids. v3: teamfight highlights. v4: winning team. v5: takedown streaks.
     /// </summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     private const double DefaultTickRate = 64;
-    private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector(), new DenseFightDetector()];
+    private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector(), new DenseFightDetector(), new TakedownDetector()];
 
     public async Task<MatchAnalysis> AnalyzeFileAsync(string path, IProgress<double>? progress = null, CancellationToken ct = default)
     {
@@ -80,8 +80,7 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
             .ToList();
 
         var context = new DetectionContext(tickRate, totalTicks, playerList, kills);
-        var highlights = _detectors
-            .SelectMany(d => d.Detect(context))
+        var highlights = TakedownDetector.RemoveCoveredMultiKills(_detectors.SelectMany(d => d.Detect(context)).ToList())
             .OrderByDescending(h => h.Score).ThenBy(h => h.StartTick)
             .ToList();
 

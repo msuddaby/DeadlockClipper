@@ -13,7 +13,7 @@ import {
   type Team,
 } from '../api'
 import HealthBanner from '../components/HealthBanner'
-import { compilationId, formatClock, highlightLabel, teamName, useHeroNames, useMe } from '../format'
+import { compilationId, formatClock, highlightName, teamName, useHeroNames, useMe } from '../format'
 import { renderStatusText, useRenderHealth, useRenders } from '../renders'
 
 export default function DemoPage() {
@@ -324,13 +324,17 @@ function HighlightRow({
     <li className="highlight">
       <div className="highlight-row">
         <button className="highlight-main" onClick={() => setOpen((o) => !o)}>
-          <span className={`badge hl-${h.type.toLowerCase()}`}>{highlightLabel[h.type]}</span>
+          <span className={`badge hl-${h.type.toLowerCase()}`}>{highlightName(h.type, h.kills.length)}</span>
           {h.type === 'TeamFight' ? (
             <FightSummary h={h} players={players} heroName={heroName} me={me} />
           ) : (
             <span>
               <strong>{h.playerName}</strong> <span className="muted">({heroName(h.heroId)})</span>
-              {h.type !== 'KillCompilation' && <span className="muted small"> · {h.kills.length} kills</span>}
+              {h.type === 'TakedownStreak' ? (
+                <TakedownSummary h={h} />
+              ) : (
+                h.type !== 'KillCompilation' && <span className="muted small"> · {h.kills.length} kills</span>
+              )}
             </span>
           )}
           <span className="mono">{formatClock(h.startTimeSeconds)}</span>
@@ -370,7 +374,7 @@ function HighlightRow({
           {h.kills.map((k) => (
             <li key={k.tick + k.victimSteamId} className="small">
               <span className="mono">{formatClock(k.gameTimeSeconds)}</span>{' '}
-              {h.type === 'TeamFight' && (
+              {(h.type === 'TeamFight' || h.type === 'TakedownStreak') && (
                 <>
                   <PlayerTag id={k.attackerSteamId} players={players} heroName={heroName} me={me} /> →{' '}
                 </>
@@ -663,6 +667,19 @@ function Assists({ ids, players, me }: { ids: string[]; players: Map<string, Pla
           <span className={id === me ? 'my-assist' : undefined}>{players.get(id)?.name ?? 'Unknown'}</span>
         </span>
       ))}
+    </span>
+  )
+}
+
+/** " · 3 takedowns: 1 kill, 2 assists in 5s" */
+function TakedownSummary({ h }: { h: Highlight }) {
+  const kills = h.kills.filter((k) => k.attackerSteamId === h.playerSteamId).length
+  const assists = h.kills.length - kills
+  const span = Math.round(h.endTimeSeconds - h.startTimeSeconds)
+  return (
+    <span className="muted small">
+      {' '}
+      · {h.kills.length} takedowns: {kills} {kills === 1 ? 'kill' : 'kills'}, {assists} {assists === 1 ? 'assist' : 'assists'} in {span}s
     </span>
   )
 }

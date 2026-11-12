@@ -57,7 +57,7 @@ public static class OverlayTemplates
             .slashtxt img { height: 170px; filter: grayscale(.3) drop-shadow(0 6px 16px #000); }
             """, $"""
             <div class="abs slash"></div><div class="abs slashtxt"><div class="big">{index + 1}</div>
-              <div><div class="k">KILL</div><div class="v">{E(who)}</div></div>{Img(victim.Card)}</div>
+              <div><div class="k">{E(kill.Verb)}</div><div class="v">{E(who)}</div></div>{Img(victim.Card)}</div>
             """);
     }
 

@@ -52,6 +52,8 @@ public enum HighlightType
     KillCompilation,
     // A burst of kills from both teams with the quiet stretches cut out; see Highlights.DenseFightDetector.
     TeamFight,
+    // 3+ kills and assists in quick succession by one player; see Highlights.TakedownDetector.
+    TakedownStreak,
 }
 
 /// <summary>A stretch of demo to record, in ticks.</summary>

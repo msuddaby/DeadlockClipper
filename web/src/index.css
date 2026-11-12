@@ -289,6 +289,9 @@ progress.wide {
 .badge.hl-quadkill {
   color: #ff9cd2;
 }
+.badge.hl-takedownstreak {
+  color: #7ee0d4;
+}
 .badge.hl-teamfight {
   color: #ffb36b;
 }

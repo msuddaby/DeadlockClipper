@@ -50,8 +50,9 @@ public sealed class RenderOptions
 /// False for kills that only time the captions (a teamfight's kills come from both teams, so numbering them would
 /// mislead; the game's own kill feed shows them).
 /// </param>
+/// <param name="Verb">What the player did: "KILL", or "ASSIST" in a takedown streak.</param>
 public sealed record KillMark(double OffsetSeconds, string Label, bool IsFinal, string VictimName = "", int VictimHeroId = 0,
-    bool ShowMarker = true);
+    bool ShowMarker = true, string Verb = "KILL");
 
 /// <summary>Everything needed to render one highlight. Plain data so it can be sent to a remote worker later.</summary>
 public sealed record RenderJob(

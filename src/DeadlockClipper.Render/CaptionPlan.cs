@@ -20,6 +20,8 @@ public static class CaptionPlan
             throw new InvalidOperationException($"No top-bar slot for {player.Name}; cannot point the camera at them.");
 
         var label = Label(highlight.Type, highlight.Kills.Count);
+        // In a takedown streak some of the player's takedowns are assists.
+        string Verb(KillEvent k) => k.AttackerSteamId == highlight.PlayerSteamId ? "KILL" : "ASSIST";
         var fight = highlight.Type == HighlightType.TeamFight;
         var segments = highlight.Segments is { Count: > 0 } s
             ? s
@@ -28,11 +30,12 @@ public static class CaptionPlan
             .OrderBy(k => k.Tick)
             .Select((k, i) => new KillMark(
                 OffsetSeconds: Math.Round(ClipOffset(k.Tick, segments, analysis.TickRate), 2),
-                Label: i == highlight.Kills.Count - 1 ? label : "KILL",
+                Label: i == highlight.Kills.Count - 1 ? label : Verb(k),
                 IsFinal: i == highlight.Kills.Count - 1,
                 VictimName: k.VictimName,
                 VictimHeroId: k.VictimHeroId,
-                ShowMarker: !fight))
+                ShowMarker: !fight,
+                Verb: Verb(k)))
             .ToList();
 
         var hero = heroName?.Invoke(highlight.HeroId);
@@ -101,6 +104,7 @@ public static class CaptionPlan
     {
         HighlightType.KillCompilation => $"{kills} KILLS",
         HighlightType.TeamFight => "TEAMFIGHT",
+        HighlightType.TakedownStreak => Core.Highlights.TakedownDetector.Label(kills),
         HighlightType.DoubleKill => "DOUBLE KILL",
         HighlightType.TripleKill => "TRIPLE KILL",
         HighlightType.QuadKill => "QUAD KILL",

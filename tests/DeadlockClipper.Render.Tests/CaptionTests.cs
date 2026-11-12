@@ -161,6 +161,21 @@ public class CaptionTests
         Assert.Contains(cues, c => c.Kind == DeadlockClipper.Render.Overlays.OverlayKind.Final);
     }
 
+    [Fact]
+    public void TakedownJob_MarksKillsAndAssists()
+    {
+        var (analysis, _) = CsgDoubleKill();
+        KillEvent K(int tick, ulong attacker, params ulong[] assisters) => new(tick, tick / 64.0, attacker, "", 0, 50, "v", 1, "", assisters);
+        var streak = new Highlight($"{Csg}-td-1000", HighlightType.TakedownStreak, Csg, "Counter Strike Genius (150 iq)", 64,
+            1000, 1400, 15.6, 21.9, 680, 1528, 5, [K(1000, 2, Csg), K(1200, Csg), K(1400, 3, Csg)]);
+
+        var job = CaptionPlan.CreateJob("j", "d", "/x.dem", analysis, streak, "/o.mp4");
+
+        Assert.Equal(["ASSIST", "KILL", "ASSIST"], job.KillMarks.Select(k => k.Verb));
+        Assert.Equal("TRIPLE TAKEDOWN", job.HighlightLabel);
+        Assert.Equal("TRIPLE TAKEDOWN", job.KillMarks[^1].Label);
+    }
+
     /// <summary>The real ffmpeg command on synthetic recordings: segments joined, plain captions, one without audio.</summary>
     [Fact]
     public async Task Finisher_JoinsSegmentsToThePlannedLength()

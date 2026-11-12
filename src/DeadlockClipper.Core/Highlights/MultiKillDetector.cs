@@ -73,6 +73,9 @@ public sealed class MultiKillDetector(MultiKillOptions? options = null) : IHighl
         }
     }
 
+    public static bool IsMultiKill(HighlightType t) =>
+        t is HighlightType.DoubleKill or HighlightType.TripleKill or HighlightType.QuadKill or HighlightType.PentaKill or HighlightType.MegaKill;
+
     public static HighlightType TypeFor(int kills) => kills switch
     {
         <= 2 => HighlightType.DoubleKill,

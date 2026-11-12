@@ -165,6 +165,7 @@ function StatusCell({ demo }: { demo: DemoSummary }) {
 const short: Record<HighlightType, string> = {
   ...highlightLabel,
   KillCompilation: 'Compilation',
+  TakedownStreak: 'Takedowns',
 }
 
 function ResultCell({ o, me }: { o: DemoOverview; me: string | null }) {
