@@ -118,7 +118,7 @@ public static class RenderEndpoints
     }
 
     /// <summary>Returns the existing render for this highlight unless it failed (then it's retried).</summary>
-    private static async Task<ClipRender> EnqueueAsync(Guid demoId, Highlight h, MatchAnalysis analysis, AppDbContext db)
+    internal static async Task<ClipRender> EnqueueAsync(Guid demoId, Highlight h, MatchAnalysis analysis, AppDbContext db)
     {
         var existing = await db.Renders.FirstOrDefaultAsync(r => r.DemoId == demoId && r.HighlightId == h.Id);
         if (existing is { Status: not RenderStatus.Failed }) return existing;

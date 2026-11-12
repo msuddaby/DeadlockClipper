@@ -70,6 +70,11 @@ account makes one request every 110 s (~30 matches an hour); add accounts to sca
 are scored without a request, and still-downloadable, high-kill matches go first. Replays expire about three weeks
 after a match.
 
+**Auto mode** (Matches page) does this hands-off: every 30 minutes it scans your history, downloads matches whose
+score clears a threshold (with a daily cap, since demos are 200-600 MB), imports replays the game downloaded, and
+renders your multikills, takedown streaks and teamfights once they're parsed. It only touches matches played after
+you switch it on (plus a short look-back). Settings live in `data/auto-mode.json`.
+
 The same CLI has `history`, `salts`, `meta` and `download` commands for debugging.
 
 ## Config (`src/DeadlockClipper.Api/appsettings.json`)

@@ -111,24 +111,8 @@ public static class Endpoints
             var path = Path.GetFullPath(Path.Combine(dir, req.FileName));
             if (!File.Exists(path)) return Results.NotFound();
 
-            var existing = await db.Demos.FirstOrDefaultAsync(d => d.FilePath == path);
-            if (existing is not null) return Results.Ok(ToSummary(existing, queue));
-
-            var demo = new Demo
-            {
-                Id = Guid.NewGuid(),
-                FileName = req.FileName,
-                FilePath = path,
-                Source = DemoSource.LocalReplay,
-                SizeBytes = new FileInfo(path).Length,
-                MatchId = long.TryParse(Path.GetFileNameWithoutExtension(req.FileName), out var m) ? m : null,
-                Status = DemoStatus.Queued,
-                CreatedAt = DateTimeOffset.UtcNow,
-            };
-            db.Demos.Add(demo);
-            await db.SaveChangesAsync();
-            queue.Enqueue(demo.Id);
-            return Results.Accepted($"/api/demos/{demo.Id}", ToSummary(demo, queue));
+            var (demo, created) = await ImportLocalAsync(path, db, queue, autoMode: false);
+            return created ? Results.Accepted($"/api/demos/{demo.Id}", ToSummary(demo, queue)) : Results.Ok(ToSummary(demo, queue));
         });
 
         // Download by match id: salts from the Game Coordinator, the replay from Valve, then parse (see MatchEndpoints).
@@ -207,6 +191,31 @@ public static class Endpoints
         if (d.Source == DemoSource.LocalReplay && d.DurationSeconds is { } secs && File.Exists(d.FilePath))
             return new DateTimeOffset(File.GetLastWriteTimeUtc(d.FilePath)).AddSeconds(-secs);
         return null;
+    }
+
+    /// <summary>Adds a replay from the game's folder (referenced in place) and queues it for parsing, unless already added.</summary>
+    internal static async Task<(Demo Demo, bool Created)> ImportLocalAsync(string path, AppDbContext db, ParseQueue queue, bool autoMode)
+    {
+        var existing = await db.Demos.FirstOrDefaultAsync(d => d.FilePath == path);
+        if (existing is not null) return (existing, false);
+
+        var fileName = Path.GetFileName(path);
+        var demo = new Demo
+        {
+            Id = Guid.NewGuid(),
+            FileName = fileName,
+            FilePath = path,
+            Source = DemoSource.LocalReplay,
+            SizeBytes = new FileInfo(path).Length,
+            MatchId = long.TryParse(Path.GetFileNameWithoutExtension(fileName), out var m) ? m : null,
+            Status = DemoStatus.Queued,
+            CreatedAt = DateTimeOffset.UtcNow,
+            AutoMode = autoMode,
+        };
+        db.Demos.Add(demo);
+        await db.SaveChangesAsync();
+        queue.Enqueue(demo.Id);
+        return (demo, true);
     }
 
     internal static DemoSummaryDto ToSummary(Demo d, ParseQueue queue) => new(

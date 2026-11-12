@@ -3,11 +3,15 @@ using DeadlockClipper.Core.Parsing;
 
 namespace DeadlockClipper.Steam;
 
+/// <summary>A teamfight the player got kills in, and what it adds to the match's score.</summary>
+public sealed record FightPotential(Highlight Fight, int PlayerKills, double Score);
+
 /// <summary>What a match's metadata says about one player's clip potential, without the demo.</summary>
 public sealed record MatchPotential(
     int Kills,
     IReadOnlyList<Highlight> Highlights,
-    // Sum of the player's highlight scores (MultiKillDetector's scale), 0 when they have none.
+    IReadOnlyList<FightPotential> Fights,
+    // Multikill scores plus a share of each teamfight the player fought in; 0 when there's nothing.
     double Score);
 
 /// <summary>
@@ -69,16 +73,36 @@ public static class MetadataAnalysis
         return (players, kills);
     }
 
+    /// <summary>Bump when scoring changes; stored scores below it are recomputed. v2: teamfights count.</summary>
+    public const int ScoreVersion = 2;
+
+
+    /// <summary>
+    /// What a teamfight adds: 1.5 x (player's kills in it)^2, capped at the fight's score. On the multikill scale, so 2
+    /// kills in a fight ~ a double kill (6) and 3 ~ a triple (13.5). Scaling by the fight's size instead let one kill
+    /// in a 20-kill fight outrank two double kills. Metadata has no assists, so kills are the measure of taking part.
+    /// </summary>
+    public static double FightScore(Highlight fight, int playerKills) => Math.Round(Math.Min(fight.Score, 1.5 * playerKills * playerKills), 2);
+
     public static MatchPotential Score(CMsgMatchMetaDataContents contents, ulong playerSteamId)
     {
         var (players, kills) = ToKills(contents);
         var totalTicks = (int)Math.Round(contents.MatchInfo.DurationS * TickRate);
+        var context = new DetectionContext(TickRate, totalTicks, players, kills);
         var highlights = new MultiKillDetector()
-            .Detect(new DetectionContext(TickRate, totalTicks, players, kills))
+            .Detect(context)
             .Where(h => h.PlayerSteamId == playerSteamId)
             .OrderBy(h => h.StartTick)
             .ToList();
+        var fights = new DenseFightDetector()
+            .Detect(context)
+            .Select(f => (Fight: f, Mine: f.Kills.Count(k => k.AttackerSteamId == playerSteamId)))
+            .Where(x => x.Mine > 0)
+            .Select(x => new FightPotential(x.Fight, x.Mine, FightScore(x.Fight, x.Mine)))
+            .OrderBy(x => x.Fight.StartTick)
+            .ToList();
         var playerKills = kills.Count(k => k.AttackerSteamId == playerSteamId && k.VictimSteamId != playerSteamId);
-        return new MatchPotential(playerKills, highlights, Math.Round(highlights.Sum(h => h.Score), 2));
+        return new MatchPotential(playerKills, highlights, fights,
+            Math.Round(highlights.Sum(h => h.Score) + fights.Sum(f => f.Score), 2));
     }
 }

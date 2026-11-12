@@ -44,6 +44,12 @@ public sealed class Demo
 
     /// <summary>Analyzer version that produced AnalysisJson; older analyses are re-parsed on startup.</summary>
     public int AnalysisVersion { get; set; }
+
+    /// <summary>Added by auto mode (downloaded or imported); auto mode renders its highlights once parsed.</summary>
+    public bool AutoMode { get; set; }
+
+    /// <summary>When auto mode queued this demo's renders (it does so once).</summary>
+    public DateTimeOffset? AutoRenderedAt { get; set; }
 }
 
 public enum RenderStatus
@@ -111,6 +117,9 @@ public sealed class ScannedMatch
     public int? ClusterId { get; set; }
     public long? ReplaySalt { get; set; }
     public long? MetadataSalt { get; set; }
+
+    /// <summary>MetadataAnalysis.ScoreVersion that produced Score; older scores are recomputed.</summary>
+    public int ScoreVersion { get; set; }
 
     /// <summary>When Valve deletes the replay (from the Game Coordinator).</summary>
     public DateTimeOffset? ReplayValidThrough { get; set; }

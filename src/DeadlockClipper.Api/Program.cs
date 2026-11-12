@@ -49,6 +49,8 @@ builder.Services.AddSingleton<MatchScanQueue>();
 builder.Services.AddHostedService<MatchScanWorker>();
 builder.Services.AddSingleton<DownloadQueue>();
 builder.Services.AddHostedService<DownloadWorker>();
+builder.Services.AddSingleton<AutoModeState>();
+builder.Services.AddHostedService<AutoModeWorker>();
 builder.Services.AddSingleton<HeroCatalog>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<HeroCatalog>());
 

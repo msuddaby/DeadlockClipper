@@ -65,6 +65,34 @@ public class MetadataAnalysisTests
     }
 
     [Fact]
+    public void Score_CountsTeamfightsThePlayerGotKillsIn()
+    {
+        // 8 kills 10 s apart at 20:00: Me gets 3 (one per enemy, victims cycle), the enemy team the rest.
+        const ECitadelLobbyTeam A = ECitadelLobbyTeam.KEcitadelLobbyTeamTeam0, B = ECitadelLobbyTeam.KEcitadelLobbyTeamTeam1;
+        var info = new CMsgMatchMetaDataContents.Types.MatchInfo { MatchId = 1, DurationS = 2400 };
+        var me = Player(Me, 7, B, 64);
+        var e1 = Player(Enemy1, 1, A, 87);
+        var e2 = Player(Enemy2, 2, A, 25);
+        var mate = Player(42, 8, B, 3);
+        void Death(CMsgMatchMetaDataContents.Types.Players victim, uint t, uint killerSlot) =>
+            victim.DeathDetails.Add(new CMsgMatchMetaDataContents.Types.Deaths { GameTimeS = t, KillerPlayerSlot = killerSlot });
+        Death(e1, 1200, 7); Death(mate, 1210, 1); Death(e2, 1220, 7); Death(me, 1230, 2);
+        Death(mate, 1240, 2); Death(e1, 1250, 7); Death(mate, 1260, 1); Death(me, 1270, 1);
+        info.Players.AddRange([me, e1, e2, mate]);
+
+        var potential = MetadataAnalysis.Score(new CMsgMatchMetaDataContents { MatchInfo = info }, Id(Me));
+
+        var fight = Assert.Single(potential.Fights);
+        Assert.Equal(3, fight.PlayerKills);
+        Assert.Equal(8, fight.Fight.Kills.Count);
+        Assert.Equal(13.5, fight.Score); // 1.5 x 3^2: about a triple kill
+        Assert.Equal(Math.Round(potential.Highlights.Sum(h => h.Score) + fight.Score, 2), potential.Score);
+
+        // A player with no kills in the fight gets nothing from it.
+        Assert.Empty(MetadataAnalysis.Score(new CMsgMatchMetaDataContents { MatchInfo = info }, Id(42)).Fights);
+    }
+
+    [Fact]
     public void ParseMetadata_UnwrapsTheFileFormat()
     {
         var contents = Match();

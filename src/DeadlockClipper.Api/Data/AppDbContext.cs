@@ -22,6 +22,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         demo.Property(d => d.Status).HasConversion<string>();
         demo.Property(d => d.CreatedAt).HasConversion(toMs);
         demo.Property(d => d.ParsedAt).HasConversion(toMsNullable);
+        demo.Property(d => d.AutoRenderedAt).HasConversion(toMsNullable);
         demo.HasIndex(d => d.FilePath);
         demo.HasIndex(d => d.CreatedAt);
 

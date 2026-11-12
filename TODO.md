@@ -23,6 +23,15 @@
 8. [ ] **Remove the temporary GC quota logger** once Valve's metadata limit is pinned down: `QuotaLog`/`QuotaAnalysis`,
    `GET /api/steam/quota`, `Clipper:Steam:QuotaProbe` in appsettings.json. Tune `MetadataIntervalSeconds` and the
    backoff to what it found first.
+9. [ ] *(parked)* **Render worker in a container.** One Steam client + bot account + gamescope + PipeWire per container,
+   AMD GPU passed through, game install shared read-only. Unlocks rendering while you play (bot account instead of
+   yours), ~3 parallel instances on the RX 7900 XT (CPU ~5 cores, RAM ~7 GB each), and the same unit as a remote
+   worker for a platform. Needs: per-instance names for console.log/cfg files, render-request, capture target and
+   silent sink; one RenderWorker per instance pulling from a queue; a Deadlock invite per bot account.
+10. [x] **Teamfights in the Matches ranking** (from match metadata, no demo needed). A fight adds 1.5 x (your kills
+    in it)^2, capped at the fight's score; stored matches are re-scored from their metadata files (no GC quota).
+11. [x] **Auto mode.** Scans history every 30 min, downloads matches scoring >= a threshold (daily cap), imports new
+    local replays, and renders your highlights once parsed. Matches page → Auto mode.
 
 ## Bugs
 - [x] (fixed: playback start is now detected by frame-difference, not freezedetect) Rendered clips could open with the "GAME IS PAUSED" box fading out for about 0.5 s after resume; trimming only the frozen frames doesn't remove it. Fix: seek about 1 s before the clip start and trim by time, or hide the pause panel.

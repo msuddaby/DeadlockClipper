@@ -9,6 +9,7 @@
     <Project Path="src/DeadlockClipper.Steam/DeadlockClipper.Steam.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DeadlockClipper.Api.Tests/DeadlockClipper.Api.Tests.csproj" />
     <Project Path="tests/DeadlockClipper.Core.Tests/DeadlockClipper.Core.Tests.csproj" />
     <Project Path="tests/DeadlockClipper.Render.Tests/DeadlockClipper.Render.Tests.csproj" />
     <Project Path="tests/DeadlockClipper.Steam.Tests/DeadlockClipper.Steam.Tests.csproj" />

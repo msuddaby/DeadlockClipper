@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { api, type ScannedMatch } from '../api'
+import AutoModeCard from '../components/AutoModeCard'
 import SteamAccounts from '../components/SteamAccounts'
 import { formatClock, formatDate, highlightLabel, useHeroNames, useMe } from '../format'
 
@@ -47,6 +48,8 @@ export default function MatchesPage() {
           </p>
         )}
       </section>
+
+      <AutoModeCard me={me} />
 
       {me && (
         <Matches
@@ -237,8 +240,13 @@ function MatchRow({
         {m.highlights.length > 0 && (
           <div className="hl-chips">
             {m.highlights.map((h) => (
-              <span key={h.timeSeconds} className={`badge hl-${h.type.toLowerCase()}`} title={`${h.kills} kills`}>
+              <span
+                key={`${h.type}-${h.timeSeconds}`}
+                className={`badge hl-${h.type.toLowerCase()}`}
+                title={h.type === 'TeamFight' ? `${h.kills} kills in the fight, ${h.playerKills} yours` : `${h.kills} kills`}
+              >
                 {highlightLabel[h.type]} {formatClock(h.timeSeconds)}
+                {h.type === 'TeamFight' && ` · ${h.playerKills}/${h.kills}`}
               </span>
             ))}
           </div>

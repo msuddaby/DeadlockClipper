@@ -176,8 +176,11 @@ export type MetadataStatus = 'Pending' | 'Done' | 'Unavailable' | 'Failed'
 export interface MatchHighlight {
   type: HighlightType
   timeSeconds: number
+  /** For a teamfight: both teams' kills. */
   kills: number
   score: number
+  /** For a teamfight: your kills in it. */
+  playerKills: number | null
 }
 
 export interface ScannedMatch {
@@ -202,6 +205,31 @@ export interface ScanResult {
   matches: ScannedMatch[]
   /** The history has no matches older than these. */
   reachedEnd: boolean
+}
+
+export interface AutoModeSettings {
+  enabled: boolean
+  steamId: string | null
+  since: string | null
+  lookbackDays: number
+  minScore: number
+  maxDownloadsPerDay: number
+  importLocalReplays: boolean
+  renderMultikills: boolean
+  renderTeamfights: boolean
+  renderCompilation: boolean
+  compilationMinKills: number
+  scanIntervalMinutes: number
+}
+
+export interface AutoMode {
+  settings: AutoModeSettings
+  status: {
+    lastScanAt: string | null
+    nextScanAt: string | null
+    lastError: string | null
+    recent: { at: string; message: string }[]
+  }
 }
 
 export interface SteamAccount {
@@ -280,6 +308,14 @@ export const api = {
   renderCompilation: (demoId: string, steamId: string) =>
     request<RenderInfo>(`/api/demos/${demoId}/players/${steamId}/compilation`, { method: 'POST' }),
   steamStatus: () => request<SteamStatus>('/api/steam/status'),
+  autoMode: () => request<AutoMode>('/api/auto'),
+  saveAutoMode: (settings: AutoModeSettings) =>
+    request<AutoMode>('/api/auto', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
+  runAutoMode: () => request<AutoMode>('/api/auto/run', { method: 'POST' }),
   addSteamAccount: (username: string, password: string) =>
     request<LoginStatus>('/api/steam/accounts', {
       method: 'POST',

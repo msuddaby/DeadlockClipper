@@ -68,6 +68,15 @@ public static class SchemaUpgrade
         if (!ColumnExists(db, "Matches", "MetadataSalt"))
             db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" ADD COLUMN "MetadataSalt" INTEGER NULL;""");
 
+        if (!ColumnExists(db, "Matches", "ScoreVersion"))
+            db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" ADD COLUMN "ScoreVersion" INTEGER NOT NULL DEFAULT 0;""");
+
+        if (!ColumnExists(db, "Demos", "AutoMode"))
+        {
+            db.Database.ExecuteSqlRaw("""ALTER TABLE "Demos" ADD COLUMN "AutoMode" INTEGER NOT NULL DEFAULT 0;""");
+            db.Database.ExecuteSqlRaw("""ALTER TABLE "Demos" ADD COLUMN "AutoRenderedAt" INTEGER NULL;""");
+        }
+
         if (!ColumnExists(db, "Demos", "AnalysisVersion"))
             db.Database.ExecuteSqlRaw("""ALTER TABLE "Demos" ADD COLUMN "AnalysisVersion" INTEGER NOT NULL DEFAULT 0;""");
     }

@@ -2,13 +2,16 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 using DeadlockClipper.Api.Data;
+using DeadlockClipper.Core.Parsing;
 using DeadlockClipper.Steam;
 using Microsoft.EntityFrameworkCore;
 
 namespace DeadlockClipper.Api.Jobs;
 
-/// <summary>A multikill found in match metadata (times are whole seconds).</summary>
-public sealed record MatchHighlightDto(string Type, double TimeSeconds, int Kills, double Score);
+/// <summary>A highlight found in match metadata (times are whole seconds).</summary>
+/// <param name="Kills">Kills in the highlight (for a teamfight, both teams').</param>
+/// <param name="PlayerKills">For a teamfight: the scanned player's kills in it.</param>
+public sealed record MatchHighlightDto(string Type, double TimeSeconds, int Kills, double Score, int? PlayerKills = null);
 
 /// <summary>Salts saved on a scanned match, so a later download or scan doesn't spend another GC request on them.</summary>
 internal static class StoredSalts
@@ -61,6 +64,7 @@ public sealed class MatchScanWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await RescoreAsync(stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
             // A download the user asked for gets the next GC request ahead of the background scan.
@@ -80,6 +84,51 @@ public sealed class MatchScanWorker(
             var wait = await ScanAsync(next.Value, stoppingToken);
             if (wait > TimeSpan.Zero) await Task.Delay(wait, stoppingToken);
         }
+    }
+
+    /// <summary>
+    /// Matches scored by older scoring are scored again. With stored salts the metadata file comes straight from
+    /// Valve's file servers (no GC request); without them the match goes back in the scan queue.
+    /// </summary>
+    private async Task RescoreAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var stale = await db.Matches
+            .Where(m => m.MetadataStatus == MetadataStatus.Done && m.ScoreVersion < MetadataAnalysis.ScoreVersion)
+            .ToListAsync(ct);
+        if (stale.Count == 0) return;
+        log.LogInformation("Re-scoring {Count} matches for scoring v{Version}", stale.Count, MetadataAnalysis.ScoreVersion);
+
+        var downloader = new ReplayDownloader(http.CreateClient("replays"));
+        foreach (var m in stale)
+        {
+            if (m.Kills < 2) { m.ScoreVersion = MetadataAnalysis.ScoreVersion; continue; } // never fetched; still 0
+            if (StoredSalts.From(m) is not { } salts) { m.MetadataStatus = MetadataStatus.Pending; continue; }
+            try
+            {
+                Apply(m, MetadataAnalysis.Score(await downloader.GetMetadataAsync(salts, ct), (ulong)m.PlayerSteamId));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or FileNotFoundException or InvalidDataException)
+            {
+                log.LogInformation("Couldn't re-score match {Match} ({Message}); queueing it for a rescan", m.MatchId, ex.Message);
+                m.MetadataStatus = MetadataStatus.Pending;
+            }
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    private void Apply(ScannedMatch row, MatchPotential potential)
+    {
+        row.Score = potential.Score;
+        row.ScoreVersion = MetadataAnalysis.ScoreVersion;
+        row.HighlightsJson = JsonSerializer.Serialize(
+            potential.Highlights.Select(h => new MatchHighlightDto(h.Type.ToString(), h.StartTimeSeconds, h.Kills.Count, h.Score))
+                .Concat(potential.Fights.Select(f => new MatchHighlightDto(nameof(HighlightType.TeamFight), f.Fight.StartTimeSeconds,
+                    f.Fight.Kills.Count, f.Score, f.PlayerKills)))
+                .OrderBy(h => h.TimeSeconds)
+                .ToList(),
+            json);
     }
 
     private async Task<bool> DownloadWaitingForSaltsAsync(CancellationToken ct)
@@ -102,6 +151,7 @@ public sealed class MatchScanWorker(
             .ExecuteUpdateAsync(u => u
                 .SetProperty(x => x.MetadataStatus, MetadataStatus.Done)
                 .SetProperty(x => x.Score, 0.0)
+                .SetProperty(x => x.ScoreVersion, MetadataAnalysis.ScoreVersion)
                 .SetProperty(x => x.HighlightsJson, "[]"), ct);
 
         // Expired replays can't be rendered: don't spend a request on them.
@@ -188,13 +238,7 @@ public sealed class MatchScanWorker(
         row.ScannedAt = DateTimeOffset.UtcNow;
         row.ReplayValidThrough = validThrough ?? row.ReplayValidThrough;
         if (fetched != null) StoredSalts.Save(row, fetched);
-        if (potential != null)
-        {
-            row.Score = potential.Score;
-            row.HighlightsJson = JsonSerializer.Serialize(
-                potential.Highlights.Select(h => new MatchHighlightDto(h.Type.ToString(), h.StartTimeSeconds, h.Kills.Count, h.Score)).ToList(),
-                json);
-        }
+        if (potential != null) Apply(row, potential);
         await db.SaveChangesAsync(CancellationToken.None);
         return wait;
     }
