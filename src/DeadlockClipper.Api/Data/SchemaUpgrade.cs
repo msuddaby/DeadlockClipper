@@ -60,6 +60,8 @@ public static class SchemaUpgrade
                 """);
         }
 
+        if (PrimaryKeyColumns(db, "Matches") == 1) RekeyMatchesPerPlayer(db);
+
         if (!ColumnExists(db, "Matches", "ClusterId"))
         {
             db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" ADD COLUMN "ClusterId" INTEGER NULL;""");
@@ -77,9 +79,82 @@ public static class SchemaUpgrade
             db.Database.ExecuteSqlRaw("""ALTER TABLE "Demos" ADD COLUMN "AutoRenderedAt" INTEGER NULL;""");
         }
 
+        if (!TableExists(db, "Rosters"))
+        {
+            db.Database.ExecuteSqlRaw("""
+                CREATE TABLE "Rosters" (
+                    "MatchId" INTEGER NOT NULL CONSTRAINT "PK_Rosters" PRIMARY KEY,
+                    "WinningTeam" TEXT NOT NULL,
+                    "PlayersJson" TEXT NULL,
+                    "FetchedAt" INTEGER NOT NULL
+                );
+                """);
+        }
+        if (!TableExists(db, "PlayerNames"))
+        {
+            db.Database.ExecuteSqlRaw("""
+                CREATE TABLE "PlayerNames" (
+                    "SteamId" INTEGER NOT NULL CONSTRAINT "PK_PlayerNames" PRIMARY KEY,
+                    "Name" TEXT NOT NULL,
+                    "UpdatedAt" INTEGER NOT NULL
+                );
+                """);
+        }
+
         if (!ColumnExists(db, "Demos", "AnalysisVersion"))
             db.Database.ExecuteSqlRaw("""ALTER TABLE "Demos" ADD COLUMN "AnalysisVersion" INTEGER NOT NULL DEFAULT 0;""");
     }
+
+    /// <summary>
+    /// Matches used to be keyed by match id alone, so scanning a second player who shared a match took the row over.
+    /// SQLite can't change a primary key in place: copy the rows into a table keyed by (match, player).
+    /// </summary>
+    private static void RekeyMatchesPerPlayer(AppDbContext db)
+    {
+        var columns = string.Join(", ", db.Database
+            .SqlQuery<string>($"SELECT name AS Value FROM pragma_table_info('Matches')").AsEnumerable()
+            .Select(c => $"\"{c}\""));
+        using var tx = db.Database.BeginTransaction();
+        db.Database.ExecuteSqlRaw("""ALTER TABLE "Matches" RENAME TO "Matches_old";""");
+        db.Database.ExecuteSqlRaw("""DROP INDEX IF EXISTS "IX_Matches_PlayerSteamId_StartTime";""");
+        db.Database.ExecuteSqlRaw("""DROP INDEX IF EXISTS "IX_Matches_MetadataStatus";""");
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE "Matches" (
+                "MatchId" INTEGER NOT NULL,
+                "PlayerSteamId" INTEGER NOT NULL,
+                "StartTime" INTEGER NOT NULL,
+                "DurationSeconds" INTEGER NOT NULL,
+                "HeroId" INTEGER NOT NULL,
+                "Kills" INTEGER NOT NULL,
+                "Deaths" INTEGER NOT NULL,
+                "Assists" INTEGER NOT NULL,
+                "NetWorth" INTEGER NOT NULL,
+                "MetadataStatus" TEXT NOT NULL,
+                "Error" TEXT NULL,
+                "Score" REAL NULL,
+                "HighlightsJson" TEXT NULL,
+                "ClusterId" INTEGER NULL,
+                "ReplaySalt" INTEGER NULL,
+                "MetadataSalt" INTEGER NULL,
+                "ScoreVersion" INTEGER NOT NULL DEFAULT 0,
+                "ReplayValidThrough" INTEGER NULL,
+                "ScannedAt" INTEGER NULL,
+                CONSTRAINT "PK_Matches" PRIMARY KEY ("MatchId", "PlayerSteamId")
+            );
+            CREATE INDEX "IX_Matches_PlayerSteamId_StartTime" ON "Matches" ("PlayerSteamId", "StartTime");
+            CREATE INDEX "IX_Matches_MetadataStatus" ON "Matches" ("MetadataStatus");
+            """);
+        // Column names come from the old table itself, not user input.
+#pragma warning disable EF1002
+        db.Database.ExecuteSqlRaw($"""INSERT INTO "Matches" ({columns}) SELECT {columns} FROM "Matches_old";""");
+#pragma warning restore EF1002
+        db.Database.ExecuteSqlRaw("""DROP TABLE "Matches_old";""");
+        tx.Commit();
+    }
+
+    private static int PrimaryKeyColumns(AppDbContext db, string table) =>
+        db.Database.SqlQuery<int>($"SELECT COUNT(*) AS Value FROM pragma_table_info({table}) WHERE pk > 0")
+            .AsEnumerable().First();
 
     private static bool TableExists(AppDbContext db, string table) =>
         db.Database.SqlQuery<int>($"SELECT COUNT(*) AS Value FROM sqlite_master WHERE type = 'table' AND name = {table}")

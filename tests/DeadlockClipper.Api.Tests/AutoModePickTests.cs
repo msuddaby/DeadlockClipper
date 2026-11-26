@@ -53,6 +53,16 @@ public class AutoModePickTests
     }
 
     [Fact]
+    public void ChatKills_MineOnly_AndCanBeTurnedOff()
+    {
+        var mine = H("c1", HighlightType.ChatKill, Me, Kill(100, Me));
+        var theirs = H("c2", HighlightType.ChatKill, Mate, Kill(200, Mate));
+
+        Assert.Equal(["c1"], AutoModeWorker.Pick(Analysis([], mine, theirs), new AutoModeSettings(), Me).Select(h => h.Id));
+        Assert.Empty(AutoModeWorker.Pick(Analysis([], mine), new AutoModeSettings { RenderChatKills = false }, Me));
+    }
+
+    [Fact]
     public void NothingWhenImNotInTheMatch()
     {
         var mine = H("a", HighlightType.DoubleKill, Me, Kill(100, Me), Kill(200, Me));

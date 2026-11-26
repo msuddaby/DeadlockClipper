@@ -71,6 +71,14 @@ builder.Services.AddSingleton(sp =>
     return render;
 });
 builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
+// Hero art for the UI (and the same cache the overlays use). Null when the game install isn't found.
+builder.Services.AddSingleton(sp =>
+{
+    var render = sp.GetRequiredService<RenderOptions>();
+    return File.Exists(Path.Combine(render.GameDir, "pak01_dir.vpk"))
+        ? new DeadlockClipper.GameData.HeroAssets(render.GameDir, render.AssetCacheDir)
+        : null!;
+});
 builder.Services.AddSingleton<IGameSession, GameSession>();
 builder.Services.AddSingleton<IRecorder, Recorder>();
 builder.Services.AddSingleton<DeadlockClipper.Render.Overlays.IOverlayArtist, DeadlockClipper.Render.Overlays.OverlayArtist>();
@@ -100,6 +108,8 @@ using (var scope = app.Services.CreateScope())
 app.MapClipperApi();
 app.MapRenderApi();
 app.MapMatchApi();
+app.MapPlayerStatsApi();
+app.MapMediaApi();
 
 // Serve the built frontend (web/dist copied to wwwroot) when not using the Vite dev server.
 app.UseDefaultFiles();

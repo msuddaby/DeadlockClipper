@@ -12,6 +12,8 @@ public class RendererTests
         public bool Alive { get; set; }
         /// <summary>Crash the game the next time a command containing this text is sent.</summary>
         public string? CrashOn { get; set; }
+        /// <summary>Time out on the next pause after a recording, as the post-game screen does.</summary>
+        public bool IgnorePauseAfterResume { get; set; }
 
         public bool IsLaunched { get; private set; }
         public string? LoadedDemo { get; set; }
@@ -27,6 +29,11 @@ public class RendererTests
 
         public Task SendAsync(string commands, CancellationToken ct)
         {
+            if (IgnorePauseAfterResume && commands == "demo_pause" && Log.LastOrDefault() == "demo_resume")
+            {
+                IgnorePauseAfterResume = false;
+                throw new TimeoutException($"Game did not execute commands: {commands}");
+            }
             Log.AddRange(commands.Split('\n'));
             if (CrashOn != null && commands.Contains(CrashOn))
             {
@@ -141,6 +148,20 @@ public class RendererTests
         await renderer.RenderBatchAsync([Job("a", 91302, 92173, 8), Job("b", 91789, 92852, 12)], null, default);
 
         // b starts before a ended, so the demo is reloaded rather than seeking backwards.
+        Assert.Equal(2, game.Log.Count(l => l.StartsWith("playdemo")));
+    }
+
+    [Fact]
+    public async Task PauseIgnoredAtEndOfMatch_KeepsTheClipAndReloadsForTheNext()
+    {
+        var (renderer, game, finisher) = Create();
+        game.IgnorePauseAfterResume = true;
+
+        var results = await renderer.RenderBatchAsync([Job("a", 98431, 99400), Job("b", 110000, 111000)], null, default);
+
+        Assert.All(results, r => Assert.True(r.Success));
+        Assert.Equal(["a", "b"], finisher.Finished);
+        // The demo ended under "a", so "b" loads it again instead of seeking a demo that's no longer playing.
         Assert.Equal(2, game.Log.Count(l => l.StartsWith("playdemo")));
     }
 

@@ -15,8 +15,16 @@ public sealed record AutoModeSettings
 {
     public bool Enabled { get; init; }
 
-    /// <summary>Whose matches to clip (SteamID64).</summary>
+    /// <summary>Whose matches to clip (SteamID64s). Each must be a Steam friend of a clipper account.</summary>
+    public IReadOnlyList<string> SteamIds { get; init; } = [];
+
+    /// <summary>Settings saved before auto mode took several players; read once and moved into <see cref="SteamIds"/>.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? SteamId { get; init; }
+
+    /// <summary>The players as numbers, skipping anything that isn't a SteamID64.</summary>
+    public IReadOnlyList<ulong> Players() =>
+        SteamIds.Select(s => ulong.TryParse(s, out var id) ? id : 0).Where(id => id != 0).Distinct().ToList();
 
     /// <summary>Only matches played after this are downloaded/imported; set when auto mode is switched on.</summary>
     public DateTimeOffset? Since { get; init; }
@@ -33,6 +41,7 @@ public sealed record AutoModeSettings
     public bool ImportLocalReplays { get; init; } = true;
 
     public bool RenderMultikills { get; init; } = true; // multikills and takedown streaks
+    public bool RenderChatKills { get; init; } = true; // single kills the victim typed in chat about
     public bool RenderTeamfights { get; init; } = true; // fights you killed or assisted in at least twice
     public bool RenderCompilation { get; init; }
     public int CompilationMinKills { get; init; } = 15;
@@ -69,7 +78,10 @@ public sealed class AutoModeState(DemoStorage storage)
                 if (_settings != null) return _settings;
                 try { _settings = File.Exists(_path) ? JsonSerializer.Deserialize<AutoModeSettings>(File.ReadAllText(_path)) : null; }
                 catch (JsonException) { _settings = null; }
-                return _settings ??= new AutoModeSettings();
+                _settings ??= new AutoModeSettings();
+                if (_settings is { SteamId: { } legacy, SteamIds.Count: 0 })
+                    _settings = _settings with { SteamIds = [legacy], SteamId = null };
+                return _settings;
             }
         }
     }
@@ -129,11 +141,11 @@ public sealed class AutoModeWorker(
         while (!stoppingToken.IsCancellationRequested)
         {
             var settings = state.Settings;
-            if (settings is { Enabled: true, SteamId: { } sid } && ulong.TryParse(sid, out var steamId))
+            if (settings is { Enabled: true } && settings.Players() is { Count: > 0 } players)
             {
                 try
                 {
-                    await PassAsync(settings, steamId, stoppingToken);
+                    await PassAsync(settings, players, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -145,35 +157,40 @@ public sealed class AutoModeWorker(
         }
     }
 
-    private async Task PassAsync(AutoModeSettings settings, ulong steamId, CancellationToken ct)
+    private async Task PassAsync(AutoModeSettings settings, IReadOnlyList<ulong> players, CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var since = settings.Since ?? DateTimeOffset.UtcNow.AddDays(-settings.LookbackDays);
 
         if (state.LastScanAt is not { } last || DateTimeOffset.UtcNow - last >= TimeSpan.FromMinutes(settings.ScanIntervalMinutes))
-            await ScanAsync(db, steamId, ct);
+            await ScanAsync(db, players, ct);
         if (settings.ImportLocalReplays) await ImportLocalAsync(db, since, ct);
-        await DownloadAsync(db, settings, steamId, since, ct);
-        await RenderAsync(db, settings, steamId, ct);
+        await DownloadAsync(db, settings, players, since, ct);
+        await RenderAsync(db, settings, players, ct);
     }
 
-    private async Task ScanAsync(AppDbContext db, ulong steamId, CancellationToken ct)
+    /// <summary>Every player's history. One player failing (e.g. not a friend of any clipper account) doesn't stop the rest.</summary>
+    private async Task ScanAsync(AppDbContext db, IReadOnlyList<ulong> players, CancellationToken ct)
     {
         state.LastScanAt = DateTimeOffset.UtcNow;
-        try
+        var errors = new List<string>();
+        foreach (var steamId in players)
         {
-            var before = await db.Matches.CountAsync(m => m.PlayerSteamId == (long)steamId, ct);
-            await MatchHistoryScanner.ScanAsync(db, gc, steamId, older: false, ct);
-            var added = await db.Matches.CountAsync(m => m.PlayerSteamId == (long)steamId, ct) - before;
-            if (added > 0) state.Log($"Found {added} new {(added == 1 ? "match" : "matches")} in your history");
-            scanQueue.Notify();
-            state.LastError = null;
+            try
+            {
+                var before = await db.Matches.CountAsync(m => m.PlayerSteamId == (long)steamId, ct);
+                await MatchHistoryScanner.ScanAsync(db, gc, steamId, older: false, ct);
+                var added = await db.Matches.CountAsync(m => m.PlayerSteamId == (long)steamId, ct) - before;
+                if (added > 0) state.Log($"Found {added} new {(added == 1 ? "match" : "matches")} for {steamId}");
+            }
+            catch (Exception ex) when (ex is SteamLoginException or GcRequestException)
+            {
+                errors.Add(players.Count == 1 ? ex.Message : $"{steamId}: {ex.Message}");
+            }
         }
-        catch (Exception ex) when (ex is SteamLoginException or GcRequestException)
-        {
-            state.LastError = $"History scan: {ex.Message}";
-        }
+        scanQueue.Notify();
+        state.LastError = errors.Count == 0 ? null : $"History scan: {string.Join(" ", errors)}";
     }
 
     /// <summary>Replays the game downloaded (you opened them in-game) since auto mode was switched on.</summary>
@@ -195,7 +212,7 @@ public sealed class AutoModeWorker(
     }
 
     /// <summary>The best-scoring new matches, up to the daily cap.</summary>
-    private async Task DownloadAsync(AppDbContext db, AutoModeSettings settings, ulong steamId, DateTimeOffset since, CancellationToken ct)
+    private async Task DownloadAsync(AppDbContext db, AutoModeSettings settings, IReadOnlyList<ulong> players, DateTimeOffset since, CancellationToken ct)
     {
         var dayAgo = DateTimeOffset.UtcNow.AddDays(-1);
         var recent = (await db.Demos.Where(d => d.AutoMode && d.Source == DemoSource.MatchId).Select(d => d.CreatedAt).ToListAsync(ct))
@@ -205,10 +222,14 @@ public sealed class AutoModeWorker(
 
         var stillKept = DateTimeOffset.UtcNow - MatchScanWorker.ReplayLifetime;
         var haveDemo = (await db.Demos.Where(d => d.MatchId != null).Select(d => d.MatchId!.Value).ToListAsync(ct)).ToHashSet();
+        var ids = players.Select(p => (long)p).ToList();
+        // A match several players were in counts once, at its best score for any of them.
         var candidates = (await db.Matches
-                .Where(m => m.PlayerSteamId == (long)steamId && m.MetadataStatus == MetadataStatus.Done && m.Score >= settings.MinScore)
+                .Where(m => ids.Contains(m.PlayerSteamId) && m.MetadataStatus == MetadataStatus.Done && m.Score >= settings.MinScore)
                 .ToListAsync(ct))
             .Where(m => m.StartTime >= since && m.StartTime >= stillKept && !haveDemo.Contains(m.MatchId))
+            .GroupBy(m => m.MatchId)
+            .Select(g => g.MaxBy(m => m.Score)!)
             .OrderByDescending(m => m.Score)
             .Take(budget);
 
@@ -221,19 +242,20 @@ public sealed class AutoModeWorker(
     }
 
     /// <summary>Queues renders for auto-mode demos that finished parsing, once per demo.</summary>
-    private async Task RenderAsync(AppDbContext db, AutoModeSettings settings, ulong steamId, CancellationToken ct)
+    private async Task RenderAsync(AppDbContext db, AutoModeSettings settings, IReadOnlyList<ulong> players, CancellationToken ct)
     {
         var ready = await db.Demos.Where(d => d.AutoMode && d.AutoRenderedAt == null && d.Status == DemoStatus.Done && d.AnalysisJson != null)
             .ToListAsync(ct);
         foreach (var demo in ready)
         {
             var analysis = JsonSerializer.Deserialize<MatchAnalysis>(demo.AnalysisJson!, json)!;
-            var picks = Pick(analysis, settings, steamId);
+            // Everyone tracked who played in it; a teamfight two of them fought in is rendered once.
+            var picks = players.SelectMany(p => Pick(analysis, settings, p)).DistinctBy(h => h.Id).OrderBy(h => h.StartTick).ToList();
             foreach (var h in picks) await RenderEndpoints.EnqueueAsync(demo.Id, h, analysis, db);
             demo.AutoRenderedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
             state.Log(picks.Count == 0
-                ? $"Match {demo.MatchId}: nothing of yours to clip"
+                ? $"Match {demo.MatchId}: nothing to clip"
                 : $"Match {demo.MatchId}: queued {picks.Count} {(picks.Count == 1 ? "clip" : "clips")}");
         }
         if (ready.Count > 0) renders.Notify();
@@ -248,6 +270,9 @@ public sealed class AutoModeWorker(
         if (settings.RenderMultikills)
             picks.AddRange(analysis.Highlights.Where(h => h.PlayerSteamId == steamId &&
                 (MultiKillDetector.IsMultiKill(h.Type) || h.Type == HighlightType.TakedownStreak)));
+
+        if (settings.RenderChatKills)
+            picks.AddRange(analysis.Highlights.Where(h => h.PlayerSteamId == steamId && h.Type == HighlightType.ChatKill));
 
         if (settings.RenderTeamfights)
             picks.AddRange(analysis.Highlights.Where(h => h.Type == HighlightType.TeamFight &&

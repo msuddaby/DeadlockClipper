@@ -1,33 +1,22 @@
-import { Link, NavLink, Route, Routes } from 'react-router'
+import { Route, Routes } from 'react-router'
+import Layout from './components/Layout'
 import ClipsPage from './pages/ClipsPage'
-import DemoPage from './pages/DemoPage'
-import DemosPage from './pages/DemosPage'
+import HomePage from './pages/HomePage'
+import MatchPage from './pages/MatchPage'
 import MatchesPage from './pages/MatchesPage'
+import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
   return (
-    <div className="app">
-      <header className="topbar">
-        <Link to="/" className="brand">
-          <span className="brand-mark">◆</span> Deadlock Clipper
-        </Link>
-        <nav className="nav">
-          <NavLink to="/" end>
-            Demos
-          </NavLink>
-          <NavLink to="/matches">Matches</NavLink>
-          <NavLink to="/clips">Clips</NavLink>
-        </nav>
-      </header>
-      <main className="content">
-        <Routes>
-          <Route path="/" element={<DemosPage />} />
-          <Route path="/demos/:id" element={<DemoPage />} />
-          <Route path="/matches" element={<MatchesPage />} />
-          <Route path="/clips" element={<ClipsPage />} />
-          <Route path="*" element={<p className="muted">Page not found.</p>} />
-        </Routes>
-      </main>
-    </div>
+    <Layout>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/matches" element={<MatchesPage />} />
+        <Route path="/demos/:id" element={<MatchPage />} />
+        <Route path="/clips" element={<ClipsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<p className="muted">Page not found.</p>} />
+      </Routes>
+    </Layout>
   )
 }

@@ -125,3 +125,26 @@ public sealed class ScannedMatch
     public DateTimeOffset? ReplayValidThrough { get; set; }
     public DateTimeOffset? ScannedAt { get; set; }
 }
+
+/// <summary>
+/// Who played a match on which team and who won, from its metadata (or a parsed demo). One per match, shared by every
+/// tracked player in it; feeds "played with / against".
+/// </summary>
+public sealed class MatchRoster
+{
+    public long MatchId { get; set; }
+    public DeadlockClipper.Core.Parsing.Team WinningTeam { get; set; }
+    /// <summary>Serialized List&lt;RosterPlayer&gt;; null when Valve no longer has the metadata (don't ask again).</summary>
+    public string? PlayersJson { get; set; }
+    public DateTimeOffset FetchedAt { get; set; }
+}
+
+public sealed record RosterPlayer(ulong SteamId, DeadlockClipper.Core.Parsing.Team Team, int HeroId, int Kills, int Deaths, int Assists);
+
+/// <summary>Steam names seen for players (friends lists, persona lookups), since metadata only has account ids.</summary>
+public sealed class KnownPlayerName
+{
+    public long SteamId { get; set; }
+    public required string Name { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}

@@ -185,6 +185,61 @@ public class CaptionTests
             ClipComposer.VideoEncodeArgs(new RenderOptions { Crf = 20, X264Preset = "medium", MaxBitrateKbps = 0 }));
     }
 
+    [Fact]
+    public void VictimChat_AppearsInTheClip_AndExtendsItIfNeeded()
+    {
+        var (analysis, highlight) = CsgDoubleKill(); // kills at 98751 (Soyah) and 99272 (FunniHeCool), clip ends 99400
+        const ulong Soyah = 1; // victim ids in CsgDoubleKill are 1
+        ChatMessage Msg(int tick, ulong sender, string text, bool all = false) => new(tick, tick / 64.0, sender, "Soyah ツ", all, text);
+        var withChat = analysis with
+        {
+            Players = [.. analysis.Players, new PlayerInfo(Soyah, "Soyah ツ", Team.Amber, 2, 0, 0, 0, 0, TopBarSlot: 3)],
+            Chat =
+            [
+                Msg(98700, Soyah, "before dying: ignored"),
+                Msg(98751 + 64 * 4, Soyah, "why arent you helping on blue??"), // 4 s after dying: inside the clip
+                Msg(99272 + 64 * 9, Soyah, "gg"),                              // 9 s after the 2nd kill: past the clip's end
+                Msg(98751 + 64 * 25, Soyah, "too late (over 20 s)"),
+                Msg(98800, 99, "someone else"),
+            ],
+        };
+
+        var job = CaptionPlan.CreateJob("j", "d", "/x.dem", withChat, highlight, "/o.mp4");
+
+        Assert.Equal(["why arent you helping on blue??", "gg"], job.ChatCaptions.Select(c => c.Text));
+        Assert.Equal((98751 + 64 * 4 - 98431) / 64.0, job.ChatCaptions[0].OffsetSeconds, 2);
+        Assert.Equal(Team.Amber, job.ChatCaptions[0].SenderTeam);
+        Assert.Equal(2, job.ChatCaptions[0].SenderHeroId);
+        // The clip runs on until the "gg" has been up for ChatShowSeconds (+0.5 s).
+        Assert.Equal(99272 + 64 * 9 + (int)Math.Round((CaptionPlan.ChatShowSeconds + 0.5) * 64), job.EndTick);
+    }
+
+    [Fact]
+    public void VictimChat_ExtensionStopsAtTheNextSegment()
+    {
+        var (analysis, _) = CsgDoubleKill();
+        KillEvent K(int tick) => new(tick, tick / 64.0, Csg, "", 64, 1, "v", 2, "", []);
+        var compilation = KillCompilation.Build(analysis with { Kills = [K(10_000), K(10_700)] }, Csg)!;
+        // Two segments: 9_744..10_128 and 10_444..; a message 5 s after the first kill wants the first to run to
+        // 10_320 + 4.5 s, which would overlap the second, so it stops at 10_443 (the message still gets ~2 s).
+        var job = CaptionPlan.CreateJob("j", "d", "/x.dem", analysis with
+        {
+            Kills = [K(10_000), K(10_700)],
+            Chat = [new ChatMessage(10_000 + 64 * 5, (10_000 + 64 * 5) / 64.0, 1, "Soyah ツ", true, "lol")],
+        }, compilation, "/o.mp4");
+
+        Assert.Equal(compilation.Segments![1].StartTick - 1, job.Segments![0].EndTick);
+        Assert.Single(job.ChatCaptions); // on screen for over a second before the cut
+
+        // 6 s after: under a second before the cut, so it's left out rather than flashed.
+        var late = CaptionPlan.CreateJob("j", "d", "/x.dem", analysis with
+        {
+            Kills = [K(10_000), K(10_700)],
+            Chat = [new ChatMessage(10_000 + 64 * 6, (10_000 + 64 * 6) / 64.0, 1, "Soyah ツ", true, "lol")],
+        }, compilation, "/o.mp4");
+        Assert.Empty(late.ChatCaptions);
+    }
+
     /// <summary>The real ffmpeg command on synthetic recordings: segments joined, plain captions, one without audio.</summary>
     [Fact]
     public async Task Finisher_JoinsSegmentsToThePlannedLength()

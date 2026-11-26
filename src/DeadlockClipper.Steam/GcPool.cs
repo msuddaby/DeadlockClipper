@@ -158,6 +158,44 @@ public sealed class GcPool(SteamOptions options, ILoggerFactory loggers, QuotaLo
         throw last ?? NoAccounts();
     }
 
+    /// <summary>
+    /// Everyone on the clipper accounts' friends lists (the players whose history can be scanned), with the accounts
+    /// that have them. Connects accounts that are offline; that's a Steam login, not a rate-limited GC request.
+    /// </summary>
+    public async Task<IReadOnlyList<(SteamFriend Friend, string Account)>> GetFriendsAsync(CancellationToken ct)
+    {
+        var slots = Slots();
+        if (slots.Count == 0) throw NoAccounts();
+        var results = await Task.WhenAll(slots.Select(async slot =>
+        {
+            try
+            {
+                var friends = await RunAsync(slot, gc => gc.GetFriendsAsync(ct), ct);
+                return friends.Select(f => (f, slot.Name)).ToList();
+            }
+            catch (Exception ex) when (ex is SteamLoginException or GcRequestException or TimeoutException)
+            {
+                _log.LogInformation("Couldn't read {Account}'s friends: {Message}", slot.Name, ex.Message);
+                return [];
+            }
+        }));
+        return results.SelectMany(r => r).ToList();
+    }
+
+    /// <summary>Steam names for players, asked through one account (preferring one that's already online).</summary>
+    public async Task<IReadOnlyDictionary<ulong, string>> GetPersonaNamesAsync(IReadOnlyCollection<ulong> steamIds, CancellationToken ct)
+    {
+        var slots = Slots().OrderByDescending(s => s.Gc?.IsReady == true).ThenBy(s => s.LastError != null).ToList();
+        if (slots.Count == 0) throw NoAccounts();
+        Exception? last = null;
+        foreach (var slot in slots)
+        {
+            try { return await RunAsync(slot, gc => gc.GetPersonaNamesAsync(steamIds, ct), ct); }
+            catch (Exception ex) when (ex is SteamLoginException or GcRequestException or TimeoutException) { last = ex; }
+        }
+        throw last!;
+    }
+
     /// <summary>Connects an account (e.g. right after adding it) to check it can reach Deadlock's Game Coordinator.</summary>
     public async Task VerifyAsync(string accountName, CancellationToken ct)
     {

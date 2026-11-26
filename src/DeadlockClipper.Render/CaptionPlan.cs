@@ -23,9 +23,11 @@ public static class CaptionPlan
         // In a takedown streak some of the player's takedowns are assists.
         string Verb(KillEvent k) => k.AttackerSteamId == highlight.PlayerSteamId ? "KILL" : "ASSIST";
         var fight = highlight.Type == HighlightType.TeamFight;
-        var segments = highlight.Segments is { Count: > 0 } s
+        IReadOnlyList<ClipSegment> segments = highlight.Segments is { Count: > 0 } s
             ? s
             : [new ClipSegment(highlight.ClipStartTick, highlight.ClipEndTick)];
+        // What victims typed after dying; the clip runs on (if needed) so it's in it.
+        (var victimChat, segments) = VictimChat(analysis, highlight, segments);
         var marks = highlight.Kills
             .OrderBy(k => k.Tick)
             .Select((k, i) => new KillMark(
@@ -58,13 +60,21 @@ public static class CaptionPlan
                 : player.TopBarSlot).ToList()
             : null;
 
+        var byId = analysis.Players.ToDictionary(p => p.SteamId);
+        var chats = victimChat.Select(c =>
+        {
+            byId.TryGetValue(c.SenderSteamId!.Value, out var sender);
+            return new ChatCaption(Math.Round(ClipOffset(c.Tick, segments, analysis.TickRate), 2), sender?.Name ?? c.SenderName,
+                sender?.HeroId ?? 0, sender?.Team ?? Team.Unknown, c.AllChat, c.Text);
+        }).ToList();
+
         return new RenderJob(
             JobId: jobId,
             DemoKey: demoKey,
             DemoPath: demoPath,
             HighlightId: highlight.Id,
-            StartTick: highlight.ClipStartTick,
-            EndTick: highlight.ClipEndTick,
+            StartTick: segments[0].StartTick,
+            EndTick: segments[^1].EndTick,
             TickRate: analysis.TickRate,
             TopBarSlot: player.TopBarSlot,
             IntroTitle: player.Name.ToUpperInvariant(),
@@ -75,7 +85,50 @@ public static class CaptionPlan
             PlayerHeroId: highlight.HeroId,
             HighlightLabel: label,
             Segments: highlight.Segments is { Count: > 0 } ? segments : null,
-            SegmentTopBarSlots: slots);
+            SegmentTopBarSlots: slots,
+            Chats: chats);
+    }
+
+    /// <summary>How long after dying a victim's message still counts as a reaction.</summary>
+    public const double ChatWindowSeconds = Core.Highlights.ChatKillOptions.DefaultReactionWindowSeconds;
+    /// <summary>How long a chat bubble stays up (the clip runs on at least this long past the message).</summary>
+    public const double ChatShowSeconds = 5;
+    public const int MaxChats = 2;
+
+    /// <summary>
+    /// Messages sent by someone the player killed (or, in a takedown streak, helped kill) within
+    /// <see cref="ChatWindowSeconds"/> of dying, at most <see cref="MaxChats"/>. The segment holding the kill is
+    /// extended so each message gets its full time on screen, without running into the next segment.
+    /// </summary>
+    internal static (List<ChatMessage> Chat, IReadOnlyList<ClipSegment> Segments) VictimChat(
+        MatchAnalysis analysis, Highlight highlight, IReadOnlyList<ClipSegment> segments)
+    {
+        if (analysis.Chat is not { Count: > 0 } chat) return ([], segments);
+        var rate = analysis.TickRate;
+        var takedowns = highlight.Type == HighlightType.TakedownStreak;
+        var picks = highlight.Kills
+            .Where(k => k.AttackerSteamId == highlight.PlayerSteamId || (takedowns && k.AssisterSteamIds.Contains(highlight.PlayerSteamId)))
+            .SelectMany(k => chat
+                .Where(m => m.SenderSteamId == k.VictimSteamId && m.Tick > k.Tick && m.Tick <= k.Tick + ChatWindowSeconds * rate)
+                .Select(m => (Msg: m, Kill: k)))
+            .DistinctBy(p => p.Msg)
+            .OrderBy(p => p.Msg.Tick)
+            .Take(MaxChats)
+            .ToList();
+        if (picks.Count == 0) return ([], segments);
+
+        var segs = segments.ToList();
+        foreach (var (msg, kill) in picks)
+        {
+            var i = segs.FindLastIndex(x => x.StartTick <= kill.Tick);
+            if (i < 0) continue;
+            var cap = i + 1 < segs.Count ? segs[i + 1].StartTick - 1 : analysis.TotalTicks > 0 ? analysis.TotalTicks : int.MaxValue;
+            var needed = msg.Tick + (int)Math.Round((ChatShowSeconds + 0.5) * rate);
+            segs[i] = segs[i] with { EndTick = Math.Min(Math.Max(segs[i].EndTick, needed), cap) };
+        }
+        // Keep only messages that ended up on screen for at least a second.
+        var shown = picks.Where(p => segs.Any(x => p.Msg.Tick >= x.StartTick && p.Msg.Tick + rate <= x.EndTick)).Select(p => p.Msg).ToList();
+        return (shown, segs);
     }
 
     /// <summary>"Hidden King 6–3 Archmother": kills per team in the fight, by the teams' in-game names.</summary>
@@ -105,6 +158,7 @@ public static class CaptionPlan
         HighlightType.KillCompilation => $"{kills} KILLS",
         HighlightType.TeamFight => "TEAMFIGHT",
         HighlightType.TakedownStreak => Core.Highlights.TakedownDetector.Label(kills),
+        HighlightType.ChatKill => "KILL",
         HighlightType.DoubleKill => "DOUBLE KILL",
         HighlightType.TripleKill => "TRIPLE KILL",
         HighlightType.QuadKill => "QUAD KILL",

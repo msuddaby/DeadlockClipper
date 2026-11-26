@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
 import { api, type HighlightType } from './api'
 
 export function formatClock(seconds: number): string {
@@ -29,6 +29,7 @@ export const highlightLabel: Record<HighlightType, string> = {
   KillCompilation: 'Kill Compilation',
   TeamFight: 'Teamfight',
   TakedownStreak: 'Takedowns',
+  ChatKill: 'Kill + Chat',
 }
 
 /** "Triple Takedown" etc. for takedown streaks (the type is shared); the plain label otherwise. */
@@ -57,25 +58,5 @@ export function useHeroNames() {
   )
 }
 
-const ME_KEY = 'deadlockclipper.me'
-
-/** The viewer's own Steam ID, remembered per browser. */
-export function useMe(): [string | null, (steamId: string | null) => void] {
-  const [me, setMeState] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(ME_KEY)
-    } catch {
-      return null
-    }
-  })
-  const setMe = useCallback((steamId: string | null) => {
-    setMeState(steamId)
-    try {
-      if (steamId) localStorage.setItem(ME_KEY, steamId)
-      else localStorage.removeItem(ME_KEY)
-    } catch {
-      // storage unavailable; keep in-memory value
-    }
-  }, [])
-  return [me, setMe]
-}
+/** The player the pages show; see players.ts. */
+export { useMe } from './players'

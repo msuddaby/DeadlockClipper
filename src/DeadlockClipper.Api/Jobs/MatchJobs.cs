@@ -21,6 +21,17 @@ internal static class StoredSalts
             ? new MatchSalts((ulong)m.MatchId, (uint)cluster, (uint)replay, (uint)meta, m.ReplayValidThrough)
             : null;
 
+    /// <summary>Salts any tracked player's row of the match already has (they're per match, not per player).</summary>
+    public static async Task<MatchSalts?> FindAsync(AppDbContext db, long matchId, CancellationToken ct) =>
+        From(await db.Matches.Where(m => m.MatchId == matchId && m.ClusterId != null && m.ReplaySalt != null && m.MetadataSalt != null)
+            .FirstOrDefaultAsync(ct));
+
+    /// <summary>Saves the salts on every tracked player's row of the match (tracked by the context; caller saves).</summary>
+    public static async Task SaveAllAsync(AppDbContext db, long matchId, MatchSalts salts, CancellationToken ct)
+    {
+        foreach (var row in await db.Matches.Where(m => m.MatchId == matchId).ToListAsync(ct)) Save(row, salts);
+    }
+
     public static void Save(ScannedMatch m, MatchSalts salts)
     {
         m.ClusterId = (int)salts.ClusterId;
@@ -77,7 +88,10 @@ public sealed class MatchScanWorker(
             var next = await NextPendingAsync(stoppingToken);
             if (next == null)
             {
-                await queue.WaitAsync(Timeout.InfiniteTimeSpan, stoppingToken);
+                // Nothing to score: fill in rosters for "played with / against", one match at a time, so anything
+                // more important (a scan request, a download) gets the next turn.
+                var backfillWait = await BackfillRosterAsync(stoppingToken);
+                await queue.WaitAsync(backfillWait ?? Timeout.InfiniteTimeSpan, stoppingToken);
                 continue;
             }
 
@@ -107,7 +121,9 @@ public sealed class MatchScanWorker(
             if (StoredSalts.From(m) is not { } salts) { m.MetadataStatus = MetadataStatus.Pending; continue; }
             try
             {
-                Apply(m, MetadataAnalysis.Score(await downloader.GetMetadataAsync(salts, ct), (ulong)m.PlayerSteamId));
+                var contents = await downloader.GetMetadataAsync(salts, ct);
+                Apply(m, MetadataAnalysis.Score(contents, (ulong)m.PlayerSteamId));
+                if (!db.Rosters.Local.Any(r => r.MatchId == m.MatchId)) await Rosters.SaveAsync(db, m.MatchId, contents, json, ct);
             }
             catch (Exception ex) when (ex is HttpRequestException or FileNotFoundException or InvalidDataException)
             {
@@ -138,8 +154,9 @@ public sealed class MatchScanWorker(
         var downloading = await db.Demos.Where(d => d.Status == DemoStatus.Downloading && d.MatchId != null)
             .Select(d => d.MatchId!.Value).ToListAsync(ct);
         if (downloading.Count == 0) return false;
-        var withSalts = await db.Matches.Where(m => downloading.Contains(m.MatchId) && m.ReplaySalt != null).CountAsync(ct);
-        return withSalts < downloading.Count;
+        var withSalts = await db.Matches.Where(m => downloading.Contains(m.MatchId) && m.ReplaySalt != null)
+            .Select(m => m.MatchId).Distinct().CountAsync(ct);
+        return withSalts < downloading.Distinct().Count();
     }
 
     private async Task<(long MatchId, long PlayerSteamId)?> NextPendingAsync(CancellationToken ct)
@@ -183,17 +200,20 @@ public sealed class MatchScanWorker(
         MatchPotential? potential = null;
         DateTimeOffset? validThrough = null;
         MatchSalts? fetched = null;
+        CMsgMatchMetaDataContents? contents = null;
+        var noMetadata = false; // Valve doesn't have it: remember that for the roster too
         var wait = TimeSpan.Zero;
 
         try
         {
             MatchSalts? stored;
+            // Another tracked player's row of this match may already have them: then this costs no GC request.
             await using (var lookup = scopes.CreateAsyncScope())
-                stored = StoredSalts.From(await lookup.ServiceProvider.GetRequiredService<AppDbContext>().Matches.FindAsync([match.MatchId], ct));
+                stored = await StoredSalts.FindAsync(lookup.ServiceProvider.GetRequiredService<AppDbContext>(), match.MatchId, ct);
             var salts = stored ?? await gc.GetMatchSaltsAsync((ulong)match.MatchId, MetadataAnalysis.ToAccountId((ulong)match.PlayerSteamId), ct);
             fetched = salts;
             validThrough = salts.ReplayValidThrough;
-            var contents = await new ReplayDownloader(http.CreateClient("replays")).GetMetadataAsync(salts, ct);
+            contents = await new ReplayDownloader(http.CreateClient("replays")).GetMetadataAsync(salts, ct);
             potential = MetadataAnalysis.Score(contents, (ulong)match.PlayerSteamId);
             status = MetadataStatus.Done;
         }
@@ -206,7 +226,7 @@ public sealed class MatchScanWorker(
         }
         catch (GcRequestException ex) when (ex.Result is GcResult.InvalidMatch)
         {
-            (status, error) = (MetadataStatus.Unavailable, ex.Message);
+            (status, error, noMetadata) = (MetadataStatus.Unavailable, ex.Message, true);
         }
         catch (GcRequestException ex) when (ex.Result is GcResult.MatchInFlight)
         {
@@ -214,7 +234,7 @@ public sealed class MatchScanWorker(
         }
         catch (FileNotFoundException ex)
         {
-            (status, error) = (MetadataStatus.Unavailable, ex.Message);
+            (status, error, noMetadata) = (MetadataStatus.Unavailable, ex.Message, true);
         }
         catch (SteamLoginException ex)
         {
@@ -231,16 +251,67 @@ public sealed class MatchScanWorker(
 
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var row = await db.Matches.FindAsync([match.MatchId], CancellationToken.None);
+        var row = await db.Matches.FindAsync([match.MatchId, match.PlayerSteamId], CancellationToken.None);
         if (row == null) return wait;
         row.MetadataStatus = status;
         row.Error = error;
         row.ScannedAt = DateTimeOffset.UtcNow;
         row.ReplayValidThrough = validThrough ?? row.ReplayValidThrough;
-        if (fetched != null) StoredSalts.Save(row, fetched);
+        if (fetched != null) await StoredSalts.SaveAllAsync(db, match.MatchId, fetched, CancellationToken.None);
         if (potential != null) Apply(row, potential);
+        if (contents != null || noMetadata) await Rosters.SaveAsync(db, match.MatchId, contents, json, CancellationToken.None);
         await db.SaveChangesAsync(CancellationToken.None);
         return wait;
+    }
+
+    /// <summary>
+    /// Fetches the roster of one match that doesn't have one. With stored salts that's just a file from Valve's replay
+    /// servers; without (matches skipped for having under two kills) it costs a paced GC request, so only matches
+    /// whose replay Valve still keeps are tried.
+    /// </summary>
+    /// <returns>How long to wait before the next one; null when every match has a roster.</returns>
+    private async Task<TimeSpan?> BackfillRosterAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var missing = await db.Matches
+            .Where(m => m.MetadataStatus != MetadataStatus.Pending && m.MetadataStatus != MetadataStatus.Unavailable &&
+                        !db.Rosters.Any(r => r.MatchId == m.MatchId))
+            .ToListAsync(ct);
+        var keptSince = DateTimeOffset.UtcNow - ReplayLifetime;
+        var byMatch = missing.GroupBy(m => m.MatchId).ToList();
+        var free = byMatch.Select(g => g.Select(StoredSalts.From).FirstOrDefault(x => x != null)).FirstOrDefault(x => x != null);
+        var paid = byMatch.Where(g => g.First().StartTime >= keptSince).OrderByDescending(g => g.First().StartTime)
+            .Select(g => g.First()).FirstOrDefault();
+        if (free == null && paid == null) return null;
+
+        var matchId = (long)(free?.MatchId ?? (ulong)paid!.MatchId);
+        try
+        {
+            var salts = free;
+            if (salts == null)
+            {
+                salts = await gc.GetMatchSaltsAsync((ulong)matchId, MetadataAnalysis.ToAccountId((ulong)paid!.PlayerSteamId), ct);
+                await StoredSalts.SaveAllAsync(db, matchId, salts, ct);
+            }
+            var contents = await new ReplayDownloader(http.CreateClient("replays")).GetMetadataAsync(salts, ct);
+            await Rosters.SaveAsync(db, matchId, contents, json, ct);
+        }
+        catch (GcRequestException ex) when (ex.Result is GcResult.RateLimited or GcResult.TooBusy)
+        {
+            return (gc.AllLimitedUntil() ?? DateTimeOffset.UtcNow.AddMinutes(5)) - DateTimeOffset.UtcNow;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or InvalidDataException or GcRequestException { Result: GcResult.InvalidMatch })
+        {
+            await Rosters.SaveAsync(db, matchId, null, json, ct); // gone: don't ask again
+        }
+        catch (Exception ex) when (ex is SteamLoginException or GcRequestException or HttpRequestException or TimeoutException)
+        {
+            log.LogInformation("Roster backfill for match {Match} failed ({Message}); retrying later", matchId, ex.Message);
+            return TimeSpan.FromMinutes(5);
+        }
+        await db.SaveChangesAsync(ct);
+        return free != null ? TimeSpan.FromMilliseconds(500) : TimeSpan.Zero; // paid requests are paced by the pool
     }
 }
 
@@ -313,11 +384,11 @@ public sealed class DownloadWorker(
         try
         {
             // A scanned match already has its salts; only unscanned ones cost a (rate-limited) GC request.
-            var scanned = await db.Matches.FindAsync([matchId], ct);
-            var salts = StoredSalts.From(scanned) ?? await SaltsWaitingOutRateLimitsAsync(demo, scanned, db, ct);
+            var scanned = await db.Matches.Where(m => m.MatchId == matchId).FirstOrDefaultAsync(ct);
+            var salts = await StoredSalts.FindAsync(db, matchId, ct) ?? await SaltsWaitingOutRateLimitsAsync(demo, scanned, db, ct);
             if (scanned != null)
             {
-                StoredSalts.Save(scanned, salts); // lets the scanner score this match without its own request
+                await StoredSalts.SaveAllAsync(db, matchId, salts, ct); // lets the scanner score it without its own request
                 scan.Notify();
             }
             demo.Error = null;

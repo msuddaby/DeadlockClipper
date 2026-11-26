@@ -29,6 +29,16 @@ public sealed record PlayerInfo(
     // This is what `citadel_spectate_topbar_player` takes.
     int TopBarSlot = 0);
 
+/// <summary>A chat message. Valve's demos record all chat and both teams' team chat.</summary>
+public sealed record ChatMessage(
+    int Tick,
+    double GameTimeSeconds,
+    // Null if the sender couldn't be resolved (e.g. a spectator).
+    ulong? SenderSteamId,
+    string SenderName,
+    bool AllChat,
+    string Text);
+
 public sealed record KillEvent(
     int Tick,
     double GameTimeSeconds,
@@ -54,6 +64,8 @@ public enum HighlightType
     TeamFight,
     // 3+ kills and assists in quick succession by one player; see Highlights.TakedownDetector.
     TakedownStreak,
+    // One kill whose victim typed in chat right after; see Highlights.ChatKillDetector.
+    ChatKill,
 }
 
 /// <summary>A stretch of demo to record, in ticks.</summary>
@@ -90,4 +102,6 @@ public sealed record MatchAnalysis(
     IReadOnlyList<KillEvent> Kills,
     IReadOnlyList<Highlight> Highlights,
     // From the GameOver message; Unknown for demos that end before the Patron falls (or older analyses).
-    Team WinningTeam = Team.Unknown);
+    Team WinningTeam = Team.Unknown,
+    // Null for analyses made before chat was recorded.
+    IReadOnlyList<ChatMessage>? Chat = null);

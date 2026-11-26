@@ -3,7 +3,7 @@
 export type DemoSource = 'Upload' | 'LocalReplay' | 'MatchId'
 export type DemoStatus = 'Downloading' | 'Queued' | 'Parsing' | 'Done' | 'Failed'
 export type Team = 'Unknown' | 'Spectator' | 'Amber' | 'Sapphire'
-export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation' | 'TeamFight' | 'TakedownStreak'
+export type HighlightType = 'DoubleKill' | 'TripleKill' | 'QuadKill' | 'PentaKill' | 'MegaKill' | 'KillCompilation' | 'TeamFight' | 'TakedownStreak' | 'ChatKill'
 
 export interface DemoSummary {
   id: string
@@ -92,7 +92,18 @@ export interface ClipSegment {
   focusSteamId: string | null
 }
 
+export interface ChatMessage {
+  tick: number
+  gameTimeSeconds: number
+  senderSteamId: string | null
+  senderName: string
+  allChat: boolean
+  text: string
+}
+
 export interface MatchAnalysis {
+  /** Null for demos parsed before chat was recorded. Includes both teams' team chat. */
+  chat: ChatMessage[] | null
   /** 'Unknown' when the demo ends before the Patron falls. */
   winningTeam: Team
   matchId: number | null
@@ -207,15 +218,51 @@ export interface ScanResult {
   reachedEnd: boolean
 }
 
+export interface MateRecord {
+  games: number
+  /** Wins/losses for the player whose page it is. */
+  wins: number
+  losses: number
+}
+
+/** Someone a player shared matches with, on their team or the other. */
+export interface Mate {
+  steamId: string
+  name: string | null
+  heroId: number
+  with: MateRecord
+  against: MateRecord
+  lastPlayed: string | null
+}
+
+export interface Mates {
+  matches: number
+  /** Matches whose rosters are known (so counted). */
+  counted: number
+  /** Rosters still being fetched in the background. */
+  waiting: number
+  players: Mate[]
+}
+
+/** Someone on a clipper account's Steam friends list (so their match history can be scanned). */
+export interface SteamFriend {
+  steamId: string
+  name: string | null
+  /** Clipper accounts that have them as a friend. */
+  accounts: string[]
+}
+
 export interface AutoModeSettings {
   enabled: boolean
-  steamId: string | null
+  /** Whose matches auto mode clips. */
+  steamIds: string[]
   since: string | null
   lookbackDays: number
   minScore: number
   maxDownloadsPerDay: number
   importLocalReplays: boolean
   renderMultikills: boolean
+  renderChatKills: boolean
   renderTeamfights: boolean
   renderCompilation: boolean
   compilationMinKills: number
@@ -331,6 +378,14 @@ export const api = {
     }),
   removeSteamAccount: (name: string) =>
     request<void>(`/api/steam/accounts/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  mates: (steamId: string) => request<Mates>(`/api/players/${steamId}/mates`),
+  playerNames: (steamIds: string[]) =>
+    request<Record<string, string>>('/api/players/names', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ steamIds }),
+    }),
+  steamFriends: () => request<SteamFriend[]>('/api/steam/friends'),
   scannedPlayers: () => request<string[]>('/api/matches/players'),
   matches: (steamId: string) => request<ScannedMatch[]>(`/api/matches?steamId=${steamId}`),
   scanMatches: (steamId: string, older = false) =>

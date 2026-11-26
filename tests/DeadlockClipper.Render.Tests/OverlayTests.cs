@@ -68,11 +68,15 @@ public class OverlayTests
         using var artist = new OverlayArtist(options, new ProcessRunner(), NullLogger<OverlayArtist>.Instance);
         try
         {
-            var job = CsgDoubleKill();
+            // Soyah, killed at +5 s, complains in team chat at +9 s.
+            var job = CsgDoubleKill() with
+            {
+                Chats = [new ChatCaption(9.0, "Soyah ツ", 2, DeadlockClipper.Core.Parsing.Team.Amber, false, "why arent you helping on blue??")],
+            };
             var overlays = await artist.RenderAsync(job, work, default);
 
             Assert.NotNull(overlays);
-            Assert.Equal(4, overlays.Layers.Count);
+            Assert.Equal(5, overlays.Layers.Count);
             Assert.All(overlays.Layers, l => Assert.True(new FileInfo(l.PngPath).Length > 5_000, l.PngPath));
 
             var graph = ClipComposer.BuildOverlayGraph(overlays, 60, 1920, 1080, 1);
@@ -90,7 +94,7 @@ public class OverlayTests
             if (!string.IsNullOrEmpty(keep))
             {
                 Directory.CreateDirectory(keep);
-                foreach (var (t, name) in new[] { (1.5, "intro"), (5.6, "kill1"), (13.9, "final") })
+                foreach (var (t, name) in new[] { (1.5, "intro"), (5.6, "kill1"), (10.0, "chat"), (13.9, "final") })
                     await new ProcessRunner().RunAsync("ffmpeg", ["-v", "error", "-y", "-ss", t.ToString(System.Globalization.CultureInfo.InvariantCulture),
                         "-i", output, "-frames:v", "1", "-vf", "scale=960:-1", Path.Combine(keep, $"{name}.jpg")]);
             }

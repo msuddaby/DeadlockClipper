@@ -50,6 +50,19 @@ public static class ClipComposer
                 : DrawText(Text($"kill_{i}.txt", mark.Label), "Sans Bold", Px(52), "white", Px(3), Px(170), mark.OffsetSeconds, end));
         }
 
+        // Victims' chat, as a line where the game shows chat.
+        var chats = job.ChatCaptions;
+        for (var i = 0; i < chats.Count; i++)
+        {
+            var c = chats[i];
+            var end = Math.Min(c.OffsetSeconds + CaptionPlan.ChatShowSeconds, duration);
+            if (i + 1 < chats.Count) end = Math.Min(end, chats[i + 1].OffsetSeconds - 0.05);
+            if (end <= c.OffsetSeconds) continue;
+            var line = $"[{(c.AllChat ? "ALL" : "TEAM")}] {c.SenderName}: {c.Text}";
+            filters.Add(DrawText(Text($"chat_{i}.txt", line), "Sans Bold", Px(30), "white", Px(3), Px(460), c.OffsetSeconds, end)
+                .Replace(":x=(w-tw)/2", $":x={Px(48)}"));
+        }
+
         return new ComposePlan(string.Join(',', filters), texts);
     }
 
@@ -75,7 +88,12 @@ public static class ClipComposer
             var s = F(cue.Start);
             var e = F(cue.End);
             var length = OverlayInputSeconds(cue);
-            var fadeIn = cue.Animation == Overlays.OverlayAnimation.Fade ? 0.25 : 0.12;
+            var fadeIn = cue.Animation switch
+            {
+                Overlays.OverlayAnimation.Fade => 0.25,
+                Overlays.OverlayAnimation.SlideUp => 0.2,
+                _ => 0.12,
+            };
             // Fades are relative to the graphic's own short stream, which is then moved to start at the cue.
             chains.Add($"[{firstOverlayInput + i}:v]format=rgba{scale},fade=in:st=0:d={F(fadeIn)}:alpha=1," +
                        $"fade=out:st={F(Math.Max(0, length - 0.3))}:d=0.3:alpha=1,setpts=PTS-STARTPTS+{s}/TB[o{i}]");
@@ -90,7 +108,8 @@ public static class ClipComposer
                 _ => "0",
             };
             // eof_action=pass: once a graphic's stream ends, frames pass through untouched.
-            chains.Add($"[{last}][o{i}]overlay=x='{x}':y=0:eof_action=pass:enable='between(t\\,{s}\\,{e})'[v{i + 1}]");
+            var y = cue.Animation == Overlays.OverlayAnimation.SlideUp ? $"{(int)Math.Round(110 * height / 1080.0)}*(1-{p})" : "0";
+            chains.Add($"[{last}][o{i}]overlay=x='{x}':y='{y}':eof_action=pass:enable='between(t\\,{s}\\,{e})'[v{i + 1}]");
             last = $"v{i + 1}";
         }
 

@@ -16,6 +16,9 @@ public sealed record AddAccountRequest(string Username, string Password);
 
 public sealed record SteamCodeRequest(string Code);
 
+/// <param name="Accounts">Which clipper accounts have this player as a friend.</param>
+public sealed record SteamFriendDto(string SteamId, string? Name, IReadOnlyList<string> Accounts);
+
 /// <param name="ScanPausedUntil">Set while every account is rate-limited: metadata reading resumes then.</param>
 public sealed record SteamStatusDto(IReadOnlyList<AccountStatus> Accounts, DateTimeOffset? ScanPausedUntil, double MetadataIntervalSeconds);
 
@@ -80,6 +83,28 @@ public static class MatchEndpoints
             }
         });
 
+        // Players the clipper accounts can scan: their Steam friends. Merged across accounts, named where Steam says.
+        api.MapGet("/steam/friends", async (GcPool gc, AppDbContext db, CancellationToken ct) =>
+        {
+            try
+            {
+                var friends = await gc.GetFriendsAsync(ct);
+                foreach (var f in friends.Where(f => f.Friend.Name != null).DistinctBy(f => f.Friend.SteamId))
+                    await PlayerStatsEndpoints.RememberNameAsync(db, (long)f.Friend.SteamId, f.Friend.Name!, ct);
+                await db.SaveChangesAsync(ct);
+                return Results.Ok(friends
+                    .GroupBy(f => f.Friend.SteamId)
+                    .Select(g => new SteamFriendDto(g.Key.ToString(), g.Select(f => f.Friend.Name).FirstOrDefault(n => n != null),
+                        g.Select(f => f.Account).Distinct().ToList()))
+                    .OrderBy(f => f.Name == null).ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList());
+            }
+            catch (SteamLoginException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 503);
+            }
+        });
+
         // Whose histories have been scanned (SteamID64 strings), most matches first: lets the page recover "me".
         api.MapGet("/matches/players", async (AppDbContext db) =>
             (await db.Matches.GroupBy(m => m.PlayerSteamId).Select(g => new { g.Key, Count = g.Count() }).ToListAsync())
@@ -119,8 +144,9 @@ public static class MatchEndpoints
         api.MapGet("/auto", (AutoModeState state) => new { state.Settings, Status = state.Status() });
         api.MapPut("/auto", (AutoModeSettings settings, AutoModeState state) =>
         {
-            if (settings.Enabled && !ulong.TryParse(settings.SteamId, out _))
-                return Results.Problem("Set your SteamID before turning auto mode on.", statusCode: 400);
+            settings = settings with { SteamIds = settings.SteamIds.Where(x => ulong.TryParse(x, out _)).Distinct().ToList(), SteamId = null };
+            if (settings.Enabled && settings.SteamIds.Count == 0)
+                return Results.Problem("Pick at least one player before turning auto mode on.", statusCode: 400);
             if (settings.MinScore < 0 || settings.MaxDownloadsPerDay < 0 || settings.ScanIntervalMinutes < 5 || settings.LookbackDays < 0)
                 return Results.Problem("Invalid auto mode settings.", statusCode: 400);
 
@@ -177,7 +203,7 @@ public static class MatchEndpoints
 
         // Match ids aren't timestamps, but a scanned match knows when it was played. Checked before any retry: an
         // expired replay is gone, and asking the GC for its salts would only waste a rate-limited request.
-        var scanned = await db.Matches.FindAsync(matchId);
+        var scanned = await db.Matches.Where(m => m.MatchId == matchId).FirstOrDefaultAsync();
         if (scanned != null && scanned.StartTime + MatchScanWorker.ReplayLifetime < DateTimeOffset.UtcNow)
             return (existing, false, true);
 
@@ -273,19 +299,23 @@ public static class MatchHistoryScanner
 
         history = history.DistinctBy(m => m.MatchId).ToList();
         var ids = history.Select(m => (long)m.MatchId).ToList();
-        var known = await db.Matches.Where(m => ids.Contains(m.MatchId)).ToDictionaryAsync(m => m.MatchId, ct);
+        var others = await db.Matches.Where(m => ids.Contains(m.MatchId) && m.PlayerSteamId != (long)steamId).ToListAsync(ct);
+        var known = await db.Matches.Where(m => ids.Contains(m.MatchId) && m.PlayerSteamId == (long)steamId)
+            .ToDictionaryAsync(m => m.MatchId, ct);
         foreach (var m in history)
         {
             if (!known.TryGetValue((long)m.MatchId, out var row))
             {
-                row = new ScannedMatch { MatchId = (long)m.MatchId, MetadataStatus = MetadataStatus.Pending };
+                row = new ScannedMatch { MatchId = (long)m.MatchId, PlayerSteamId = (long)steamId, MetadataStatus = MetadataStatus.Pending };
+                // Another tracked player was in this match: reuse its salts, so scoring this player costs no GC request.
+                if (others.Where(o => o.MatchId == row.MatchId).Select(StoredSalts.From).FirstOrDefault(x => x != null) is { } salts)
+                    StoredSalts.Save(row, salts);
                 db.Matches.Add(row);
             }
             else if (row.MetadataStatus == MetadataStatus.Failed)
             {
                 row.MetadataStatus = MetadataStatus.Pending; // retry failures on each scan
             }
-            row.PlayerSteamId = (long)steamId;
             row.StartTime = DateTimeOffset.FromUnixTimeSeconds(m.StartTime);
             row.DurationSeconds = (int)m.MatchDurationS;
             row.HeroId = (int)m.HeroId;

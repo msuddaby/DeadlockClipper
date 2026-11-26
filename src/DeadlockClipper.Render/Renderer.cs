@@ -116,7 +116,7 @@ public sealed class Renderer(
                 await game.SendAsync("demo_resume", ct);
                 // Playback is real time: a segment takes as long to record as it lasts.
                 await _delay(TimeSpan.FromSeconds(preRoll + job.SegmentSeconds(segment)), ct);
-                await game.SendAsync("demo_pause", ct);
+                await PauseAfterRecordingAsync(job, ct);
                 raws.Add(await recording.StopAsync() with { PreRollSeconds = preRoll });
             }
             game.CurrentTick = segment.EndTick;
@@ -126,6 +126,25 @@ public sealed class Renderer(
         Report(RenderStage.Encoding);
         await finisher.FinishAsync(job, raws, workDir, ct);
         TryDelete(workDir);
+    }
+
+    /// <summary>
+    /// A clip that runs into the end of the match (the Patron falls) can't be paused: the post-game screen swallows
+    /// the bound key, and the demo then finishes and drops back to the hideout. The footage is already recorded, so
+    /// this isn't a failure; forget the loaded demo so the next segment or job reloads it.
+    /// </summary>
+    private async Task PauseAfterRecordingAsync(RenderJob job, CancellationToken ct)
+    {
+        try
+        {
+            await game.SendAsync("demo_pause", ct);
+        }
+        catch (TimeoutException)
+        {
+            await EnsureAliveAsync("pausing after recording", ct);
+            log.LogWarning("Could not pause after recording {Job}; the demo likely reached the end of the match", job.JobId);
+            game.LoadedDemo = null;
+        }
     }
 
     private async Task LoadDemoAsync(string demoPath, CancellationToken ct)

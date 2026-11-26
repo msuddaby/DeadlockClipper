@@ -36,11 +36,17 @@ public sealed class OverlayArtist(RenderOptions options, IProcessRunner runner, 
             var layers = new List<OverlayLayer>();
             foreach (var cue in timeline.Cues)
             {
-                var name = cue.Kind == OverlayKind.Kill ? $"kill_{cue.Index}" : cue.Kind.ToString().ToLowerInvariant();
+                var name = cue.Kind switch
+                {
+                    OverlayKind.Kill => $"kill_{cue.Index}",
+                    OverlayKind.Chat => $"chat_{cue.Index}",
+                    _ => cue.Kind.ToString().ToLowerInvariant(),
+                };
                 var html = cue.Kind switch
                 {
                     OverlayKind.Intro => OverlayTemplates.Intro(job, art),
                     OverlayKind.Kill => OverlayTemplates.Kill(job, art, cue.Index),
+                    OverlayKind.Chat => OverlayTemplates.Chat(job, art, cue.Index),
                     _ => OverlayTemplates.Final(job, art),
                 };
                 var htmlPath = Path.Combine(dir, name + ".html");
@@ -72,7 +78,8 @@ public sealed class OverlayArtist(RenderOptions options, IProcessRunner runner, 
             FontsDir: assets?.FontsDir is { } f && Directory.Exists(f) ? f : null,
             Victims: job.KillMarks.OrderBy(k => k.OffsetSeconds)
                 .Select(k => (Image(k.VictimHeroId, HeroImage.Card), HeroName(k.VictimHeroId)))
-                .ToList());
+                .ToList(),
+            ChatCards: job.ChatCaptions.Select(c => Image(c.SenderHeroId, HeroImage.Card)).ToList());
     }
 
     private async Task ScreenshotAsync(string htmlPath, string pngPath, string profile, CancellationToken ct)

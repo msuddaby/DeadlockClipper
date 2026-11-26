@@ -29,7 +29,12 @@ public class DemoAnalyzerIntegrationTests(ITestOutputHelper output)
             output.WriteLine($"  {p.Team} hero={p.HeroId} {p.Name} {p.Kills}/{p.Deaths}/{p.Assists} nw={p.NetWorth} | feed K={feedKills} D={feedDeaths}");
         }
         foreach (var h in analysis.Highlights)
+        {
             output.WriteLine($"  {h.Type} {h.PlayerName} @ {h.StartTimeSeconds:0}s ticks {h.ClipStartTick}-{h.ClipEndTick}");
+            if (h.Type == HighlightType.ChatKill)
+                foreach (var m in analysis.Chat!.Where(m => m.SenderSteamId == h.Kills[0].VictimSteamId && m.Tick > h.StartTick && m.Tick <= h.StartTick + 20 * analysis.TickRate))
+                    output.WriteLine($"      {(m.AllChat ? "ALL" : "TEAM")} {m.SenderName}: {m.Text}");
+        }
 
         Assert.Equal(12, analysis.Players.Count);
         Assert.NotEmpty(analysis.Kills);

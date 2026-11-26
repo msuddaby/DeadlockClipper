@@ -1,10 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type AutoModeSettings } from '../api'
+import { usePlayerLabel } from '../matches'
+import { usePlayers } from '../players'
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
-/** Hands-off clipping: scan history, download the best new matches, render your highlights. */
-export default function AutoModeCard({ me }: { me: string | null }) {
+/** Hands-off clipping: scan the chosen players' histories, download the best new matches, render their highlights. */
+export default function AutoModeCard() {
+  const { players, active } = usePlayers()
+  const label = usePlayerLabel()
   const queryClient = useQueryClient()
   const auto = useQuery({ queryKey: ['auto-mode'], queryFn: api.autoMode, refetchInterval: 10_000 })
   const onSaved = (data: Awaited<ReturnType<typeof api.autoMode>>) => queryClient.setQueryData(['auto-mode'], data)
@@ -14,7 +18,11 @@ export default function AutoModeCard({ me }: { me: string | null }) {
   if (!auto.data) return null
   const s = auto.data.settings
   const status = auto.data.status
-  const update = (patch: Partial<AutoModeSettings>) => save.mutate({ ...s, steamId: s.steamId ?? me, ...patch })
+  const update = (patch: Partial<AutoModeSettings>) => save.mutate({ ...s, ...patch })
+  // Players auto mode clips but who aren't in this browser's list still show, so they can be switched off.
+  const choices = [...new Set([...players.map((p) => p.steamId), ...s.steamIds])]
+  const toggleEnabled = (enabled: boolean) =>
+    update({ enabled, steamIds: enabled && s.steamIds.length === 0 && active ? [active] : s.steamIds })
   const num = (value: string, fallback: number) => (Number.isFinite(Number(value)) && value !== '' ? Number(value) : fallback)
 
   return (
@@ -31,19 +39,43 @@ export default function AutoModeCard({ me }: { me: string | null }) {
             <input
               type="checkbox"
               checked={s.enabled}
-              disabled={!me || save.isPending}
-              onChange={(e) => update({ enabled: e.target.checked, steamId: me })}
+              disabled={save.isPending || (!s.enabled && s.steamIds.length === 0 && !active)}
+              onChange={(e) => toggleEnabled(e.target.checked)}
             />
             {s.enabled ? 'On' : 'Off'}
           </label>
         </div>
       </div>
       <p className="muted small">
-        Scans your match history every {s.scanIntervalMinutes} minutes, downloads matches that score at least {s.minScore}{' '}
-        (a double kill is about 6, a triple about 13, a big teamfight you carried 25+), and renders your highlights once
-        they're parsed. Only matches played after you switch it on (plus {s.lookbackDays} days back) are touched.
+        Scans the chosen players' match histories every {s.scanIntervalMinutes} minutes, downloads matches that score at
+        least {s.minScore} (a double kill is about 6, a triple about 13, a big teamfight someone carried 25+), and renders
+        their highlights once they're parsed. Only matches played after you switch it on (plus {s.lookbackDays} days back)
+        are touched.
       </p>
-      {!me && <p className="muted small">Set your SteamID below first.</p>}
+      {choices.length === 0 ? (
+        <p className="muted small">Add a player above first.</p>
+      ) : (
+        <div className="inline-form" style={{ margin: '4px 0 12px' }}>
+          <span className="small muted">Clip matches of</span>
+          {choices.map((id) => (
+            <label key={id} className="toggle small">
+              <input
+                type="checkbox"
+                checked={s.steamIds.includes(id)}
+                disabled={save.isPending}
+                onChange={(e) =>
+                  update({
+                    steamIds: e.target.checked ? [...s.steamIds, id] : s.steamIds.filter((x) => x !== id),
+                    // Unticking the last player turns auto mode off rather than leaving it on with nobody to clip.
+                    enabled: s.enabled && (e.target.checked || s.steamIds.length > 1),
+                  })
+                }
+              />
+              {label(id)}
+            </label>
+          ))}
+        </div>
+      )}
 
       <div className="auto-grid">
         <label className="small">
@@ -69,15 +101,19 @@ export default function AutoModeCard({ me }: { me: string | null }) {
         </label>
         <label className="toggle small">
           <input type="checkbox" checked={s.renderMultikills} onChange={(e) => update({ renderMultikills: e.target.checked })} />
-          Render my multikills and takedown streaks
+          Render their multikills and takedown streaks
+        </label>
+        <label className="toggle small">
+          <input type="checkbox" checked={s.renderChatKills} onChange={(e) => update({ renderChatKills: e.target.checked })} />
+          Render single kills the victim typed in chat about
         </label>
         <label className="toggle small">
           <input type="checkbox" checked={s.renderTeamfights} onChange={(e) => update({ renderTeamfights: e.target.checked })} />
-          Render teamfights I fought in (2+ kills or assists)
+          Render teamfights they fought in (2+ kills or assists)
         </label>
         <label className="toggle small">
           <input type="checkbox" checked={s.renderCompilation} onChange={(e) => update({ renderCompilation: e.target.checked })} />
-          Render a kill compilation when I get{' '}
+          Render a kill compilation when someone gets{' '}
           <input
             className="text-input num-input"
             type="number"

@@ -9,7 +9,8 @@ public sealed record OverlayArt(
     string? PlayerLogoSvg,
     string PlayerHeroName,
     string? FontsDir,
-    IReadOnlyList<(string? Card, string HeroName)> Victims);
+    IReadOnlyList<(string? Card, string HeroName)> Victims,
+    IReadOnlyList<string?>? ChatCards = null);
 
 /// <summary>
 /// HTML for each overlay graphic, laid out on a full 1920x1080 transparent page at its on-screen position (clear of
@@ -78,6 +79,41 @@ public static class OverlayTemplates
               <div class="who">{E(job.PlayerName)} · {E(art.PlayerHeroName)}</div></div>
             """);
     }
+
+    /// <summary>
+    /// A victim's message as its own moment: a full-width band across the middle of the screen (below the
+    /// crosshair) with their portrait, name and the message at headline size, so it reads over any scene.
+    /// </summary>
+    public static string Chat(RenderJob job, OverlayArt art, int index)
+    {
+        var c = job.ChatCaptions[index];
+        var card = art.ChatCards is { } cards && index < cards.Count ? cards[index] : null;
+        var team = c.SenderTeam == Core.Parsing.Team.Amber ? "#eda544" : c.SenderTeam == Core.Parsing.Team.Sapphire ? "#6a98f0" : "#d8d8d8";
+        return Page(art, $$"""
+            .band { left: 0; right: 0; top: 610px; height: 250px;
+                    background: linear-gradient(90deg, rgba(8,8,12,0) 0%, rgba(8,8,12,.88) 16%, rgba(8,8,12,.94) 50%, rgba(8,8,12,.88) 84%, rgba(8,8,12,0) 100%); }
+            .band::before, .band::after { content: ""; position: absolute; left: 10%; right: 10%; height: 4px;
+                    background: linear-gradient(90deg, transparent, {{Gold}}, transparent); }
+            .band::before { top: 0; } .band::after { bottom: 0; }
+            .chat { left: 0; right: 0; top: 630px; height: 210px; display: flex; align-items: center; justify-content: center; gap: 34px; }
+            .chat img { height: 190px; width: 190px; object-fit: cover; object-position: 50% 12%; border-radius: 14px;
+                        border: 5px solid {{team}}; box-shadow: 0 10px 30px rgba(0,0,0,.7); }
+            .chat .body { max-width: 1240px; }
+            .chat .label { font: 600 28px Jost, sans-serif; letter-spacing: 5px; color: {{Gold}}; text-transform: uppercase; }
+            .chat .who { font: 700 52px Reaver, sans-serif; color: {{team}}; line-height: 1.05; white-space: nowrap;
+                         text-shadow: 0 3px 10px #000; }
+            .chat .msg { font: 900 70px Jost, sans-serif; color: #fff; line-height: 1.05; text-shadow: 0 4px 16px #000;
+                         overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            """, $"""
+            <div class="abs band"></div>
+            <div class="abs chat">{Img(card)}<div class="body">
+              <div class="label">{(c.AllChat ? "All chat" : "Team chat")} · after dying</div>
+              <div class="who">{E(c.SenderName)}</div>
+              <div class="msg">“{E(Truncate(c.Text, 90))}”</div></div></div>
+            """);
+    }
+
+    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
 
     private static string Page(OverlayArt art, string css, string body)
     {

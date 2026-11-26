@@ -15,6 +15,9 @@ public sealed class GcRequestException(string message, GcResult? result = null) 
     public GcResult? Result { get; } = result;
 }
 
+/// <summary>A Steam friend of a clipper account: someone whose match history the GC will share.</summary>
+public sealed record SteamFriend(ulong SteamId, string? Name);
+
 public sealed record MatchSalts(ulong MatchId, uint ClusterId, uint ReplaySalt, uint MetadataSalt, DateTimeOffset? ReplayValidThrough)
 {
     private string Base => $"http://replay{ClusterId}.valve.net/{DeadlockGc.AppId}/{MatchId}";
@@ -45,6 +48,8 @@ public sealed class DeadlockGc : IAsyncDisposable
     private TaskCompletionSource _connected = NewTcs();
     private TaskCompletionSource<SteamUser.LoggedOnCallback> _loggedOn = NewTcs<SteamUser.LoggedOnCallback>();
     private TaskCompletionSource _welcome = NewTcs();
+    private readonly TaskCompletionSource _friendsLoaded = NewTcs();
+    private readonly ConcurrentDictionary<ulong, string> _personaNames = new();
 
     public bool IsReady => _welcome.Task.IsCompletedSuccessfully;
     public SteamID? SteamId => _client.SteamID;
@@ -63,6 +68,10 @@ public sealed class DeadlockGc : IAsyncDisposable
         _callbacks.Subscribe<SteamUser.LoggedOffCallback>(cb => _log.LogWarning("Logged off by Steam: {Result}", cb.Result));
         _callbacks.Subscribe<SteamGameCoordinator.MessageCallback>(OnGcMessage);
         _callbacks.Subscribe<SteamFriends.FriendsListCallback>(OnFriendsList);
+        _callbacks.Subscribe<SteamFriends.PersonaStateCallback>(cb =>
+        {
+            if (cb.FriendID.IsIndividualAccount && !string.IsNullOrEmpty(cb.Name)) _personaNames[cb.FriendID.ConvertToUInt64()] = cb.Name;
+        });
 
         _pump = Task.Run(() =>
         {
@@ -162,6 +171,48 @@ public sealed class DeadlockGc : IAsyncDisposable
             r.ReplayValidThrough > 0 ? DateTimeOffset.FromUnixTimeSeconds(r.ReplayValidThrough) : null);
     }
 
+    /// <summary>The account's Steam friends with their names (as far as Steam sends them within a few seconds).</summary>
+    public async Task<IReadOnlyList<SteamFriend>> GetFriendsAsync(CancellationToken ct)
+    {
+        if (!IsReady) throw new InvalidOperationException("Not connected to Steam.");
+        try { await _friendsLoaded.Task.WaitAsync(TimeSpan.FromSeconds(10), ct); }
+        catch (TimeoutException) { return []; } // Steam never sent a list: no friends to show
+
+        var ids = new List<SteamID>();
+        for (var i = 0; i < _friends.GetFriendCount(); i++)
+        {
+            var id = _friends.GetFriendByIndex(i);
+            // Requests are accepted as they arrive, so a recipient is about to be a friend.
+            if (id.IsIndividualAccount &&
+                _friends.GetFriendRelationship(id) is EFriendRelationship.Friend or EFriendRelationship.RequestRecipient)
+                ids.Add(id);
+        }
+
+        string? Name(SteamID id) => _friends.GetFriendPersonaName(id) is { Length: > 0 } n ? n : null;
+        if (ids.Any(id => Name(id) == null))
+        {
+            _friends.RequestFriendInfo(ids.Where(id => Name(id) == null), EClientPersonaStateFlag.PlayerName);
+            for (var waited = 0; waited < 3000 && ids.Any(id => Name(id) == null); waited += 250)
+                await Task.Delay(250, ct);
+        }
+        return ids.Select(id => new SteamFriend(id.ConvertToUInt64(), Name(id))).ToList();
+    }
+
+    /// <summary>
+    /// Steam names for any players (not only friends): Steam answers persona requests for public profiles. Returns
+    /// the ones that arrived within a few seconds.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<ulong, string>> GetPersonaNamesAsync(IReadOnlyCollection<ulong> steamIds, CancellationToken ct)
+    {
+        if (!IsReady) throw new InvalidOperationException("Not connected to Steam.");
+        var missing = steamIds.Where(id => !_personaNames.ContainsKey(id)).ToList();
+        foreach (var chunk in missing.Chunk(100))
+            _friends.RequestFriendInfo(chunk.Select(id => new SteamID(id)), EClientPersonaStateFlag.PlayerName);
+        for (var waited = 0; waited < 5000 && steamIds.Any(id => !_personaNames.ContainsKey(id)); waited += 250)
+            await Task.Delay(250, ct);
+        return steamIds.Where(_personaNames.ContainsKey).ToDictionary(id => id, id => _personaNames[id]);
+    }
+
     private async Task<TResponse> RequestAsync<TRequest, TResponse>(ClientGCMsgProtobuf<TRequest> request, CancellationToken ct)
         where TRequest : IExtensible, new()
         where TResponse : IExtensible, new()
@@ -209,6 +260,7 @@ public sealed class DeadlockGc : IAsyncDisposable
             _log.LogInformation("Accepting friend request from {SteamId}", f.SteamID.ConvertToUInt64());
             _friends.AddFriend(f.SteamID);
         }
+        _friendsLoaded.TrySetResult();
     }
 
     private void OnDisconnected(SteamClient.DisconnectedCallback cb)

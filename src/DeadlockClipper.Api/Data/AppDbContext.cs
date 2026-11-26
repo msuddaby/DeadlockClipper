@@ -7,6 +7,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Demo> Demos => Set<Demo>();
     public DbSet<ClipRender> Renders => Set<ClipRender>();
     public DbSet<ScannedMatch> Matches => Set<ScannedMatch>();
+    public DbSet<MatchRoster> Rosters => Set<MatchRoster>();
+    public DbSet<KnownPlayerName> PlayerNames => Set<KnownPlayerName>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -36,7 +38,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
         var match = b.Entity<ScannedMatch>();
         match.ToTable("Matches");
-        match.HasKey(m => m.MatchId);
+        // One row per (match, player): two tracked players in the same match each get their own scores.
+        match.HasKey(m => new { m.MatchId, m.PlayerSteamId });
         match.Property(m => m.MatchId).ValueGeneratedNever();
         match.Property(m => m.MetadataStatus).HasConversion<string>();
         match.Property(m => m.StartTime).HasConversion(toMs);
@@ -44,5 +47,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         match.Property(m => m.ScannedAt).HasConversion(toMsNullable);
         match.HasIndex(m => new { m.PlayerSteamId, m.StartTime });
         match.HasIndex(m => m.MetadataStatus);
+
+        var roster = b.Entity<MatchRoster>();
+        roster.ToTable("Rosters");
+        roster.HasKey(r => r.MatchId);
+        roster.Property(r => r.MatchId).ValueGeneratedNever();
+        roster.Property(r => r.WinningTeam).HasConversion<string>();
+        roster.Property(r => r.FetchedAt).HasConversion(toMs);
+
+        var name = b.Entity<KnownPlayerName>();
+        name.ToTable("PlayerNames");
+        name.HasKey(n => n.SteamId);
+        name.Property(n => n.SteamId).ValueGeneratedNever();
+        name.Property(n => n.UpdatedAt).HasConversion(toMs);
     }
 }

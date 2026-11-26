@@ -46,7 +46,8 @@ public static class Endpoints
         {
             var demos = await db.Demos.OrderByDescending(d => d.CreatedAt).ToListAsync();
             var ids = demos.Where(d => d.MatchId != null).Select(d => d.MatchId!.Value).ToList();
-            var started = await db.Matches.Where(m => ids.Contains(m.MatchId)).ToDictionaryAsync(m => m.MatchId, m => m.StartTime);
+            var started = (await db.Matches.Where(m => ids.Contains(m.MatchId)).Select(m => new { m.MatchId, m.StartTime }).ToListAsync())
+                .GroupBy(m => m.MatchId).ToDictionary(g => g.Key, g => g.First().StartTime); // one row per tracked player in it
             return demos
                 .Select(d => ToSummary(d, queue) with { Overview = DemoOverview.For(d, json), PlayedAt = PlayedAt(d, started) })
                 .OrderByDescending(d => d.PlayedAt ?? d.CreatedAt);

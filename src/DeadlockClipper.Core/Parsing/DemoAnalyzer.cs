@@ -9,12 +9,12 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
 {
     /// <summary>
     /// Bump when MatchAnalysis gains data that stored analyses need; older ones are re-parsed on startup.
-    /// v2: top-bar slots, highlight ids. v3: teamfight highlights. v4: winning team. v5: takedown streaks.
+    /// v2: top-bar slots, highlight ids. v3: teamfight highlights. v4: winning team. v5: takedown streaks. v6: chat. v7: chat kills.
     /// </summary>
-    public const int Version = 5;
+    public const int Version = 7;
 
     private const double DefaultTickRate = 64;
-    private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector(), new DenseFightDetector(), new TakedownDetector()];
+    private readonly IReadOnlyList<IHighlightDetector> _detectors = detectors?.ToList() ?? [new MultiKillDetector(), new DenseFightDetector(), new TakedownDetector(), new ChatKillDetector()];
 
     public async Task<MatchAnalysis> AnalyzeFileAsync(string path, IProgress<double>? progress = null, CancellationToken ct = default)
     {
@@ -62,6 +62,20 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
                     .ToArray()));
         };
 
+        // Chat names its sender by player slot: the controller's entity index minus one (players are entities 1-12).
+        // Checked on match 135555232: a player killed at 21:42 apologizes to their team at 21:48. (Chat-wheel messages
+        // would be a better check, but their fields don't decode with these protos: account id 0, slots like 137.)
+        var chat = new List<ChatMessage>();
+        demo.UserMessageEvents.ChatMsg += m =>
+        {
+            if (string.IsNullOrWhiteSpace(m.Text)) return;
+            var sender = SenderOf(m.PlayerSlot);
+            chat.Add(new ChatMessage(demo.CurrentDemoTick.Value, MatchClock(demo), sender?.SteamID is > 0 ? sender.SteamID : null,
+                sender?.PlayerName ?? "", m.AllChat, m.Text.Trim()));
+        };
+        CCitadelPlayerController? SenderOf(int slot) =>
+            slot < 0 ? null : demo.PlayersIncludingDisconnected.FirstOrDefault(c => (int)c.EntityIndex.Value == slot + 1);
+
         // Sent once when the Patron falls; winning_team is a CitadelTeamNum (2/3), checked against real matches.
         int? winningTeam = null;
         demo.UserMessageEvents.GameOver += e => winningTeam = e.WinningTeam;
@@ -79,8 +93,9 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
             .OrderBy(p => p.Team).ThenByDescending(p => p.NetWorth)
             .ToList();
 
-        var context = new DetectionContext(tickRate, totalTicks, playerList, kills);
-        var highlights = TakedownDetector.RemoveCoveredMultiKills(_detectors.SelectMany(d => d.Detect(context)).ToList())
+        var context = new DetectionContext(tickRate, totalTicks, playerList, kills, chat);
+        var detected = TakedownDetector.RemoveCoveredMultiKills(_detectors.SelectMany(d => d.Detect(context)).ToList()).ToList();
+        var highlights = ChatKillDetector.RemoveCovered(detected)
             .OrderByDescending(h => h.Score).ThenBy(h => h.StartTick)
             .ToList();
 
@@ -96,7 +111,8 @@ public sealed class DemoAnalyzer(IEnumerable<IHighlightDetector>? detectors = nu
             Players: playerList,
             Kills: kills,
             Highlights: highlights,
-            WinningTeam: winningTeam is 2 or 3 ? (Team)winningTeam.Value : Team.Unknown);
+            WinningTeam: winningTeam is 2 or 3 ? (Team)winningTeam.Value : Team.Unknown,
+            Chat: chat);
 
         void Snapshot(CCitadelPlayerController c)
         {

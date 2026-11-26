@@ -5,12 +5,16 @@ public enum OverlayKind
     Intro,
     Kill,
     Final,
+    // Something a victim typed; Index is the job's chat index.
+    Chat,
 }
 
 public enum OverlayAnimation
 {
     SlideFromLeft,
     SlideFromRight,
+    // Rises into place from below (chat reactions).
+    SlideUp,
     Fade,
 }
 
@@ -62,6 +66,16 @@ public static class OverlayTimeline
             var start = kills[^1].OffsetSeconds + MarkerDelay + FinalLag;
             var end = Math.Min(start + FinalHold, duration);
             if (end - start >= 0.5) cues.Add(new OverlayCue(OverlayKind.Final, 0, start, end, OverlayAnimation.SlideFromRight));
+        }
+
+        var chats = job.ChatCaptions;
+        for (var i = 0; i < chats.Count; i++)
+        {
+            var start = chats[i].OffsetSeconds;
+            var end = Math.Min(start + CaptionPlan.ChatShowSeconds, duration);
+            // A second message replaces the first rather than stacking on it.
+            if (i + 1 < chats.Count) end = Math.Min(end, chats[i + 1].OffsetSeconds - 0.05);
+            if (end - start >= 0.5) cues.Add(new OverlayCue(OverlayKind.Chat, i, start, end, OverlayAnimation.SlideUp));
         }
 
         return new OverlayTimelinePlan(cues);

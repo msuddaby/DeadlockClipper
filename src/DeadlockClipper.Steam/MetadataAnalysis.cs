@@ -28,6 +28,19 @@ public static class MetadataAnalysis
     public static ulong ToSteamId64(uint accountId) => SteamId64Base + accountId;
     public static uint ToAccountId(ulong steamId64) => (uint)(steamId64 & 0xFFFFFFFF);
 
+    /// <summary>Who won, or Unknown when the match ended in an error (e.g. abandoned).</summary>
+    public static Team WinningTeam(CMsgMatchMetaDataContents contents)
+    {
+        var info = contents.MatchInfo;
+        if (info.MatchOutcome != CMsgMatchMetaDataContents.Types.EMatchOutcome.KEOutcomeTeamWin) return Team.Unknown;
+        return info.WinningTeam switch
+        {
+            ECitadelLobbyTeam.KEcitadelLobbyTeamTeam0 => Team.Amber,
+            ECitadelLobbyTeam.KEcitadelLobbyTeamTeam1 => Team.Sapphire,
+            _ => Team.Unknown,
+        };
+    }
+
     public static (IReadOnlyList<PlayerInfo> Players, IReadOnlyList<KillEvent> Kills) ToKills(CMsgMatchMetaDataContents contents)
     {
         var info = contents.MatchInfo;
